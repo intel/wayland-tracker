@@ -1,7 +1,7 @@
 module Main where
 
 import qualified Data.Word as W
-import qualified Foreign.C.Types as C
+-- import qualified Foreign.C.Types as C
 import qualified Data.Binary.Strict.Get as BG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
@@ -22,27 +22,33 @@ import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as T
 import qualified Control.Monad.Error as ET
+import qualified Numeric as N
 
 -- messages contain header and a list of data / fd blocks
 
 data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 }
 
-type WFD = C.CInt
-type WInt = W.Word32
-type WUInt = W.Word32
-type WObject = W.Word32
-type WNewId = W.Word32
-type WString = BS.ByteString
-type WArray = BS.ByteString
+data WMessageBlockType = WFD | WInt | WUInt | WFixed | WObject | WNewId | WString | WArray
 
-data WMessageBlock = WFD | WInt | WUInt | WObject | WNewId | WString | WArray
+data WMessageBlock = WMessageBlock { start :: Int, blockLength :: Int, blockType :: WMessageBlockType }
 
-data WMessage = WMessage WHeader [WMessageBlock]
+type WXmlModel = [WMessageBlockType]
+
+type WMessageModel = [WMessageBlock]
+
+data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString
 
 data Message = ClientMessage WMessage | ServerMessage WMessage
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
+
+dumpByteString :: BS.ByteString -> IO ()
+dumpByteString bs = do
+        M.mapM_ (\n -> putStr $ N.showHex n " ") bytes
+        putStrLn ""
+    where
+        bytes = BS.unpack bs
 
 loggerThread :: STM.TChan Message -> IO ()
 loggerThread chan =
@@ -62,17 +68,21 @@ parseClientMessage = ClientMessage
 parseServerMessage :: WMessage -> Message
 parseServerMessage = ServerMessage
 
-parseMessage :: Int -> BS.ByteString -> [WMessageBlock]
-parseMessage bs model = [ ]
+parseMessage :: WXmlModel -> BS.ByteString -> [WMessageBlock]
+parseMessage model bs = msgblocks
+    where
+        dataLength = BS.length bs
+        msgblocks = [WMessageBlock 0 dataLength WString]
+
 
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
 parseHeader = BG.runGet process
     where
         process :: BG.Get (W.Word32, W.Word16, W.Word16)
         process = do
-            senderId <- BG.getWord32be
-            msgSize <- BG.getWord16be
-            msgOpcode <- BG.getWord16be
+            senderId <- BG.getWord32le
+            msgSize <- BG.getWord16le
+            msgOpcode <- BG.getWord16le
             return (senderId, msgSize, msgOpcode)
 
 loop :: (WMessage -> Message) -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
@@ -101,7 +111,7 @@ loop f inputSock outputSock logger =  do
             writeData outputSock msg
 
             -- log the message
-            STM.atomically $ T.writeTChan logger msg
+            STM.atomically $ T.writeTChan logger (f msg)
             loop f inputSock outputSock logger
 
     return ()
@@ -111,73 +121,56 @@ loop f inputSock outputSock logger =  do
     -- M.unless (BS.null header) $ processMsg header
 
     where
-        readData :: Socket.Socket -> ET.ErrorT String IO Message
+        readData :: Socket.Socket -> ET.ErrorT String IO WMessage
         readData sock = do
-            header <- ET.liftIO $ BSocket.recv inputSock 8
+
+            header <- ET.liftIO $ BSocket.recv sock 8
+
+            ET.liftIO $ putStrLn "read the header"
+            ET.liftIO $ dumpByteString header
+
             ET.when (BS.null header) $ ET.throwError $ ET.strMsg "socket was closed"
 
             let p = parseHeader header
 
-            let (objectId, msgSize, opCode) = case p of
-                   (Left err, _) -> (0, 0, 0)
-                   (Right (obj, m, op), _) -> (obj, m, op)
+            let (objectId, opCode, msgSize) = case p of
+                   (Left _, _) -> (0, 0, 0)
+                   (Right (obj, op, m), _) -> (obj, op, m)
             ET.when (msgSize == 0) $ ET.throwError $ ET.strMsg "parsing error"
 
+            ET.liftIO $ putStrLn $ "parsed the header: " ++ show objectId ++ ", " ++ show msgSize ++ ", " ++ show opCode
+
             let remaining = fromIntegral $ msgSize - 8
+
+            -- TODO: get the XML model based on the opcode
+            -- read data in blocks so that we don't accidentally go over fd
 
             input <- ET.liftIO $ BSocket.recv inputSock remaining
             ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
 
-            let msg = f $ WMessage (WHeader objectId msgSize opCode) $ parseMessage 1 input
+            ET.liftIO $ putStrLn "read the message"
+            ET.liftIO $ dumpByteString input
 
-            return msg
+            let h = WHeader objectId msgSize opCode
+            let msgData = BS.append header input
+            let wmsg = WMessage h (parseMessage undefined input) msgData
 
-
-        writeData :: Socket.Socket -> Message -> IO ()
-        writeData = undefined
-
-{-
-            let (senderId, size, opcode) = case parseHeader header of
-                    (Left err, _) -> ET.throwError "failed to parse header"
-                    (Right (id, s, o), _) -> return (id, s, o)
-
-            let size = 5
-
-            let remaining = fromIntegral $ size - 8
-
-            input <- ET.liftIO $ BSocket.recv inputSock remaining
--}
-
-{-}
-        processMsg :: BS.ByteString -> ET.Either IO ()
-        processMsg header = do
-            -- let (senderId, size, opcode) = parseHeader header
+            return wmsg
 
 
+        writeData :: Socket.Socket -> WMessage -> IO ()
+        writeData sock (WMessage header blocks bs) = do
+            s <- BSocket.send sock bs
 
-                    input <- BSocket.recv inputSock remaining
+            -- go through the blocks for FD passing
 
-                    M.unless (BS.null input) $ processData header input
+            putStrLn "writing data:"
+            dumpByteString bs
 
-                    -- parse the message here: need to see if it contains fds
+            putStrLn $ "wrote " ++ show s ++ " bytes"
 
-                    -- let msg = f input
+            return ()
 
-                    -- read the data and fd blocks
-
-
-        processData header input = do
-            putStrLn "processing input"
-
-            _ <- BSocket.send outputSock input
-
-
-            -- send parsed data to logger
-
-            -- STM.atomically $ T.writeTChan logger msg
-
-            loop f inputSock outputSock logger
--}
 
 clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
 clientThread eventV clientSock serverSock loggerChan = do
