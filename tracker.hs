@@ -58,12 +58,13 @@ loggerThread chan =
     where
         processData input = do
             x <- STM.atomically $ STM.readTChan input
-            return ()
-            {-
             case x of
-                ClientMessage _ -> putStrLn "read a client request"
-                ServerMessage _ -> putStrLn "read a server event"
-            -}
+                ClientMessage (WMessage header blocks bs) -> do
+                        putStrLn "request:"
+                        dumpByteString bs
+                ServerMessage (WMessage header blocks bs) -> do
+                        putStrLn "event:"
+                        dumpByteString bs
 
 parseClientMessage :: WMessage -> Message
 parseClientMessage = ClientMessage
@@ -146,9 +147,11 @@ loop f inputSock outputSock logger =  do
             input <- ET.liftIO $ BSocket.recv inputSock remaining
             ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
 
+            {-
             ET.liftIO $ putStrLn $ "message header: id=" ++ show objectId ++ ", size=" ++ show msgSize ++ ", opcode=" ++ show opCode
             ET.liftIO $ putStrLn "message content:"
             ET.liftIO $ dumpByteString input
+            -}
 
             let h = WHeader objectId msgSize opCode
             let msgData = BS.append header input
@@ -164,7 +167,7 @@ loop f inputSock outputSock logger =  do
 
             s <- BSocket.send sock bs
 
-            CC.threadDelay 1000
+            CC.threadDelay 100000
 
             return ()
 
