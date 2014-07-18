@@ -23,6 +23,8 @@ import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as T
 import qualified Control.Monad.Error as ET
 import qualified Numeric as N
+import qualified Text.XML.Light as X
+import qualified Data.Maybe as Maybe
 
 -- messages contain header and a list of data / fd blocks
 
@@ -206,10 +208,27 @@ sigHandler sig var = do
         else SigChld
     STM.atomically $ STM.putTMVar var e
 
+parseProtocol root = (events, requests)
+    where
+        events = undefined
+        requests = undefined
+
 main :: IO ()
 main = do
+
+    -- read the protocol file(s)
+
+    xmlFile <- readFile "xml/wayland.xml"
+    let xmlDoc = X.parseXMLDoc xmlFile
+
+    M.when (Maybe.isNothing xmlDoc) $ do
+        putStrLn "Error parsing the XML file"
+        Exit.exitFailure
+
+    let (events, requests) = parseProtocol $ Maybe.fromJust xmlDoc
+
     -- read the WAYLAND_DISPLAY environment variable
-    --
+
     loggerChan <- STM.newTChanIO
     eventV <- STM.newEmptyTMVarIO
 
@@ -258,14 +277,17 @@ main = do
         e <- STM.atomically $ STM.takeTMVar eventV
 
         case e of
-            SigInt -> putStrLn "sigINT received"
-            SigChld -> putStrLn "sigCHLD received"
+            SigInt -> do
+                putStrLn "sigINT received"
+                Exit.exitSuccess
+            SigChld -> do
+                putStrLn "sigCHLD received"
+                Exit.exitSuccess
             ServerClosedSocket -> do
                 putStrLn "server closed socket"
                 Signals.signalProcess Signals.sigINT pid
-            ClientClosedSocket -> putStrLn "client closed socket"
-
-        -- all these should cause us to exit
-        putStrLn "Exiting wayland-tracker"
-        Exit.exitSuccess
+                Exit.exitFailure
+            ClientClosedSocket -> do
+                putStrLn "client closed socket"
+                Exit.exitSuccess
 
