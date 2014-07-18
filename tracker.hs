@@ -58,9 +58,12 @@ loggerThread chan =
     where
         processData input = do
             x <- STM.atomically $ STM.readTChan input
+            return ()
+            {-
             case x of
-                ClientMessage _ -> putStrLn "read a client message"
-                ServerMessage _ -> putStrLn "read a server message"
+                ClientMessage _ -> putStrLn "read a client request"
+                ServerMessage _ -> putStrLn "read a server event"
+            -}
 
 parseClientMessage :: WMessage -> Message
 parseClientMessage = ClientMessage
@@ -126,9 +129,6 @@ loop f inputSock outputSock logger =  do
 
             header <- ET.liftIO $ BSocket.recv sock 8
 
-            ET.liftIO $ putStrLn "read the header"
-            ET.liftIO $ dumpByteString header
-
             ET.when (BS.null header) $ ET.throwError $ ET.strMsg "socket was closed"
 
             let p = parseHeader header
@@ -138,8 +138,6 @@ loop f inputSock outputSock logger =  do
                    (Right (obj, op, m), _) -> (obj, op, m)
             ET.when (msgSize == 0) $ ET.throwError $ ET.strMsg "parsing error"
 
-            ET.liftIO $ putStrLn $ "parsed the header: " ++ show objectId ++ ", " ++ show msgSize ++ ", " ++ show opCode
-
             let remaining = fromIntegral $ msgSize - 8
 
             -- TODO: get the XML model based on the opcode
@@ -148,7 +146,8 @@ loop f inputSock outputSock logger =  do
             input <- ET.liftIO $ BSocket.recv inputSock remaining
             ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
 
-            ET.liftIO $ putStrLn "read the message"
+            ET.liftIO $ putStrLn $ "message header: id=" ++ show objectId ++ ", size=" ++ show msgSize ++ ", opcode=" ++ show opCode
+            ET.liftIO $ putStrLn "message content:"
             ET.liftIO $ dumpByteString input
 
             let h = WHeader objectId msgSize opCode
@@ -160,14 +159,12 @@ loop f inputSock outputSock logger =  do
 
         writeData :: Socket.Socket -> WMessage -> IO ()
         writeData sock (WMessage header blocks bs) = do
-            s <- BSocket.send sock bs
 
             -- go through the blocks for FD passing
 
-            putStrLn "writing data:"
-            dumpByteString bs
+            s <- BSocket.send sock bs
 
-            putStrLn $ "wrote " ++ show s ++ " bytes"
+            CC.threadDelay 1000
 
             return ()
 
