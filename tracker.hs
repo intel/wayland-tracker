@@ -1,8 +1,11 @@
 module Main where
 
+import qualified Data.Word as W
+import qualified Foreign.C.Types as C
+import qualified Data.Binary.Strict.Get as BG
 import qualified Control.Monad as M
--- import qualified Data.Binary as B
 import qualified Data.ByteString as BS
+-- import qualified Data.ByteString.Lazy as BSL
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
 import qualified System.Exit as Exit
@@ -18,8 +21,25 @@ import qualified Network.Socket.ByteString as BSocket
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as T
+import qualified Control.Monad.Error as ET
 
-data Message = ClientMessage | ServerMessage
+-- messages contain header and a list of data / fd blocks
+
+data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 }
+
+type WFD = C.CInt
+type WInt = W.Word32
+type WUInt = W.Word32
+type WObject = W.Word32
+type WNewId = W.Word32
+type WString = BS.ByteString
+type WArray = BS.ByteString
+
+data WMessageBlock = WFD | WInt | WUInt | WObject | WNewId | WString | WArray
+
+data WMessage = WMessage WHeader [WMessageBlock]
+
+data Message = ClientMessage WMessage | ServerMessage WMessage
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
@@ -33,40 +53,131 @@ loggerThread chan =
         processData input = do
             x <- STM.atomically $ STM.readTChan input
             case x of
-                ClientMessage -> putStrLn "read a client message"
-                ServerMessage -> putStrLn "read a server message"
+                ClientMessage _ -> putStrLn "read a client message"
+                ServerMessage _ -> putStrLn "read a server message"
 
-parseClientMessage :: BS.ByteString -> Message
-parseClientMessage _ = ClientMessage
+parseClientMessage :: WMessage -> Message
+parseClientMessage = ClientMessage
 
-parseServerMessage :: BS.ByteString -> Message
-parseServerMessage _ = ServerMessage
+parseServerMessage :: WMessage -> Message
+parseServerMessage = ServerMessage
 
-loop :: (BS.ByteString -> Message) -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
+parseMessage :: Int -> BS.ByteString -> [WMessageBlock]
+parseMessage bs model = [ ]
+
+parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
+parseHeader = BG.runGet process
+    where
+        process :: BG.Get (W.Word32, W.Word16, W.Word16)
+        process = do
+            senderId <- BG.getWord32be
+            msgSize <- BG.getWord16be
+            msgOpcode <- BG.getWord16be
+            return (senderId, msgSize, msgOpcode)
+
+loop :: (WMessage -> Message) -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
 loop f inputSock outputSock logger =  do
     -- read from client socket
-    putStrLn "recv from socket"
-    input <- BSocket.recv inputSock 4096
-    putStrLn "returned from recv"
-    -- if the socket is no longer connected, end the thread
+{-
+    putStrLn "recvfd from socket"
+    fd <- Err.catchIOError (Socket.recvFd inputSock) (\_ -> return (-1))
+    putStrLn $ "result: " ++ show fd
+-}
 
-    M.unless (BS.null input) $ processData input
+    -- Some messages contain file descriptors. We cannot just read
+    -- all there is because the file descriptors get closed by kernel.
+    -- Instead, we need to read until we know the message format and then
+    -- read until the fd. The fd is then received via recvFd.
+
+    -- Wayland message header size is 8 bytes.
+
+    -- r is either the resulting msg or an error
+    r <- ET.runErrorT $ readData inputSock
+
+    case r of
+        (Left _) -> return ()
+        (Right msg) -> do
+            -- write message to the other socket
+            writeData outputSock msg
+
+            -- log the message
+            STM.atomically $ T.writeTChan logger msg
+            loop f inputSock outputSock logger
+
+    return ()
+
+
+    -- if the socket is no longer connected, end the thread
+    -- M.unless (BS.null header) $ processMsg header
 
     where
-        processData input = do
+        readData :: Socket.Socket -> ET.ErrorT String IO Message
+        readData sock = do
+            header <- ET.liftIO $ BSocket.recv inputSock 8
+            ET.when (BS.null header) $ ET.throwError $ ET.strMsg "socket was closed"
+
+            let p = parseHeader header
+
+            let (objectId, msgSize, opCode) = case p of
+                   (Left err, _) -> (0, 0, 0)
+                   (Right (obj, m, op), _) -> (obj, m, op)
+            ET.when (msgSize == 0) $ ET.throwError $ ET.strMsg "parsing error"
+
+            let remaining = fromIntegral $ msgSize - 8
+
+            input <- ET.liftIO $ BSocket.recv inputSock remaining
+            ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
+
+            let msg = f $ WMessage (WHeader objectId msgSize opCode) $ parseMessage 1 input
+
+            return msg
+
+
+        writeData :: Socket.Socket -> Message -> IO ()
+        writeData = undefined
+
+{-
+            let (senderId, size, opcode) = case parseHeader header of
+                    (Left err, _) -> ET.throwError "failed to parse header"
+                    (Right (id, s, o), _) -> return (id, s, o)
+
+            let size = 5
+
+            let remaining = fromIntegral $ size - 8
+
+            input <- ET.liftIO $ BSocket.recv inputSock remaining
+-}
+
+{-}
+        processMsg :: BS.ByteString -> ET.Either IO ()
+        processMsg header = do
+            -- let (senderId, size, opcode) = parseHeader header
+
+
+
+                    input <- BSocket.recv inputSock remaining
+
+                    M.unless (BS.null input) $ processData header input
+
+                    -- parse the message here: need to see if it contains fds
+
+                    -- let msg = f input
+
+                    -- read the data and fd blocks
+
+
+        processData header input = do
             putStrLn "processing input"
+
             _ <- BSocket.send outputSock input
 
-            -- parse data
-
-            let msg = f input
 
             -- send parsed data to logger
 
-            STM.atomically $ T.writeTChan logger msg
+            -- STM.atomically $ T.writeTChan logger msg
 
             loop f inputSock outputSock logger
-
+-}
 
 clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
 clientThread eventV clientSock serverSock loggerChan = do
