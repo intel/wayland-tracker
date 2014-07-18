@@ -1,11 +1,11 @@
 module Main where
 
 import qualified Control.Monad as M
-import qualified Data.Binary as B
+-- import qualified Data.Binary as B
 import qualified Data.ByteString as BS
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
-import qualified System.Posix.Env as PE
+-- import qualified System.Posix.Env as PE
 import qualified System.Posix.User as PU
 import qualified System.Posix.IO as PI
 import qualified System.Posix.Process as Process
@@ -13,7 +13,7 @@ import qualified System.Posix.Signals as Signals
 import qualified System.Posix.Types as PT
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as BSocket
-import qualified System.IO as SIO
+-- import qualified System.IO as SIO
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as T
@@ -39,16 +39,21 @@ signalThread sig = do
 
     Signals.awaitSignal $ Just signals
 
+    putStrLn "awaitSignal returned"
+
     pending <- Signals.getPendingSignals
 
     -- send the signal to the master thread
     STM.atomically $ STM.putTMVar sig pending
 
 
-parseClientMessage bs = ClientMessage
+parseClientMessage :: BS.ByteString -> Message
+parseClientMessage _ = ClientMessage
 
-parseServerMessage bs = ServerMessage
+parseServerMessage :: BS.ByteString -> Message
+parseServerMessage _ = ServerMessage
 
+loop :: (BS.ByteString -> Message) -> Socket.Socket -> t -> T.TChan Message -> IO ()
 loop f inputSock outputSock logger =  do
     -- read from client socket
     putStrLn "recv from socket"
@@ -139,13 +144,12 @@ main = do
     -- process messages until the child dies (closes the socket), server dies or
     -- there is a SIGINT
 
-    s <- STM.atomically $ do
-        sig <- STM.takeTMVar signalV
-        return sig
+    M.forever $ do
+        set <- STM.atomically $  STM.takeTMVar signalV
 
-    putStrLn $ "received signal: " ++ show s
+        M.when (Signals.inSignalSet Signals.sigINT set) $ putStrLn "sigINT received"
+        M.when (Signals.inSignalSet Signals.sigCHLD set) $ putStrLn "sigCHLD received"
 
-    M.forever $ putStr ""
 
     -- in case of SIGINT, send the same signal to the child and terminate
 
