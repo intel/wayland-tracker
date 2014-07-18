@@ -21,7 +21,7 @@ import qualified Control.Concurrent.STM.TChan as T
 data Message = ClientMessage | ServerMessage
 
 loggerThread :: STM.TChan Message -> IO ()
-loggerThread chan = do
+loggerThread chan =
 
     M.forever $ processData chan
 
@@ -32,15 +32,17 @@ loggerThread chan = do
                 ClientMessage -> putStrLn "read a client message"
                 ServerMessage -> putStrLn "read a server message"
 
-signalThread :: STM.TMVar Signals.Signal -> IO ()
+signalThread :: STM.TMVar Signals.SignalSet -> IO ()
 signalThread sig = do
 
     let signals = foldr Signals.addSignal Signals.emptySignalSet [Signals.sigINT, Signals.sigCHLD]
 
     Signals.awaitSignal $ Just signals
 
+    pending <- Signals.getPendingSignals
+
     -- send the signal to the master thread
-    STM.atomically $ STM.putTMVar sig Signals.sigINT -- TODO: need to send the whole mask
+    STM.atomically $ STM.putTMVar sig pending
 
 
 parseClientMessage bs = ClientMessage
@@ -49,14 +51,17 @@ parseServerMessage bs = ServerMessage
 
 loop f inputSock outputSock logger =  do
     -- read from client socket
+    putStrLn "recv from socket"
     input <- BSocket.recv inputSock 4096
+    putStrLn "returned from recv"
     -- if the socket is no longer connected, end the thread
-    
+
     M.unless (BS.null input) $ processData input
 
     where
-        processData input = do 
-            x <- BSocket.send outputSock input
+        processData input = do
+            putStrLn "processing input"
+            -- x <- BSocket.send outputSock input
 
             -- parse data
 
@@ -67,22 +72,26 @@ loop f inputSock outputSock logger =  do
             STM.atomically $ T.writeTChan logger msg
 
             loop f inputSock outputSock logger
-    
+
 
 clientThread :: Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-clientThread clientSock serverSock logger = loop parseClientMessage clientSock serverSock logger
+clientThread =
+    loop parseClientMessage
 
 serverThread :: Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-serverThread serverSock clientSock logger = loop parseServerMessage serverSock clientSock logger
+serverThread = loop parseServerMessage
 
 execProcess :: FilePath -> [String] -> Socket.Socket -> IO a
-execProcess path args sock = do 
-    Process.executeFile path True args (Just [("WAYLAND_SOCKET", show $ Socket.fdSocket sock)])
+execProcess path args sock = do
+    let fd = show $ Socket.fdSocket sock
 
-createXdgPath :: a -> IO (String)
+    putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
+    Process.executeFile path True args (Just [("WAYLAND_SOCKET", fd)])
+
+createXdgPath :: a -> IO String
 createXdgPath _ = do
     userid <- PU.getRealUserID
-    return $ "/var/run/" ++ (show userid)
+    return $ "/var/run/" ++ show userid
 
 main :: IO ()
 main = do
@@ -90,8 +99,9 @@ main = do
     --
     loggerChan <- STM.newTChanIO
     signalV <- STM.newEmptyTMVarIO
-    
-    signalThread <- CC.forkIO $ signalThread signalV
+
+    lt <- CC.forkIO $ loggerThread loggerChan
+    st <- CC.forkIO $ signalThread signalV
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
@@ -110,30 +120,34 @@ main = do
 
     -- create socket for the child and start a thread for it
 
-    (clientSock, trackerSock) <- Socket.socketPair Socket.AF_UNIX Socket.Datagram Socket.defaultProtocol
-    
+    (clientSock, trackerSock) <- Socket.socketPair Socket.AF_UNIX Socket.Stream Socket.defaultProtocol
+
     PI.setFdOption (PT.Fd $ Socket.fdSocket clientSock) PI.CloseOnExec True
-    
+
     -- start threads for communication
 
-    -- serverThread <- CC.forkIO $ serverThread serverSock clientSock loggerChan
+    -- st <- CC.forkIO $ serverThread serverSock clientSock loggerChan
 
-    clientThread <- CC.forkIO $ clientThread clientSock serverSock loggerChan
+    ct <- CC.forkIO $ clientThread clientSock serverSock loggerChan
 
     -- fork the child
-    
-    pid <- Process.forkProcess $ execProcess "ls" ["-l"] trackerSock
+
+    pid <- Process.forkProcess $ execProcess "weston-terminal" [] trackerSock
+
+    Socket.close trackerSock
 
     -- process messages until the child dies (closes the socket), server dies or
     -- there is a SIGINT
-    
+
     s <- STM.atomically $ do
         sig <- STM.takeTMVar signalV
         return sig
 
     putStrLn $ "received signal: " ++ show s
 
+    M.forever $ putStr ""
+
     -- in case of SIGINT, send the same signal to the child and terminate
-    
+
     Signals.signalProcess Signals.sigINT pid
 
