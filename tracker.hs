@@ -5,6 +5,7 @@ import qualified Control.Monad as M
 import qualified Data.ByteString as BS
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
+import qualified System.Exit as Exit
 -- import qualified System.Posix.Env as PE
 import qualified System.Posix.User as PU
 import qualified System.Posix.IO as PI
@@ -20,6 +21,9 @@ import qualified Control.Concurrent.STM.TChan as T
 
 data Message = ClientMessage | ServerMessage
 
+data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
+    deriving (Show, Eq)
+
 loggerThread :: STM.TChan Message -> IO ()
 loggerThread chan =
 
@@ -32,28 +36,13 @@ loggerThread chan =
                 ClientMessage -> putStrLn "read a client message"
                 ServerMessage -> putStrLn "read a server message"
 
-signalThread :: STM.TMVar Signals.SignalSet -> IO ()
-signalThread sig = do
-
-    let signals = foldr Signals.addSignal Signals.emptySignalSet [Signals.sigINT, Signals.sigCHLD]
-
-    Signals.awaitSignal $ Just signals
-
-    putStrLn "awaitSignal returned"
-
-    pending <- Signals.getPendingSignals
-
-    -- send the signal to the master thread
-    STM.atomically $ STM.putTMVar sig pending
-
-
 parseClientMessage :: BS.ByteString -> Message
 parseClientMessage _ = ClientMessage
 
 parseServerMessage :: BS.ByteString -> Message
 parseServerMessage _ = ServerMessage
 
-loop :: (BS.ByteString -> Message) -> Socket.Socket -> t -> T.TChan Message -> IO ()
+loop :: (BS.ByteString -> Message) -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
 loop f inputSock outputSock logger =  do
     -- read from client socket
     putStrLn "recv from socket"
@@ -66,7 +55,7 @@ loop f inputSock outputSock logger =  do
     where
         processData input = do
             putStrLn "processing input"
-            -- x <- BSocket.send outputSock input
+            _ <- BSocket.send outputSock input
 
             -- parse data
 
@@ -79,34 +68,51 @@ loop f inputSock outputSock logger =  do
             loop f inputSock outputSock logger
 
 
-clientThread :: Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-clientThread =
-    loop parseClientMessage
+clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+clientThread eventV clientSock serverSock loggerChan = do
+    loop parseClientMessage clientSock serverSock loggerChan
+    STM.atomically $ STM.putTMVar eventV ClientClosedSocket
 
-serverThread :: Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-serverThread = loop parseServerMessage
+
+serverThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+serverThread eventV serverSock clientSock loggerChan = do
+    loop parseServerMessage serverSock clientSock loggerChan
+    STM.atomically $ STM.putTMVar eventV ServerClosedSocket
+
 
 execProcess :: FilePath -> [String] -> Socket.Socket -> IO a
 execProcess path args sock = do
     let fd = show $ Socket.fdSocket sock
 
+    env <- E.getEnvironment
+    let filteredEnv = filter (\x -> fst x /= "WAYLAND_SOCKET") env
+
     putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
-    Process.executeFile path True args (Just [("WAYLAND_SOCKET", fd)])
+    Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", fd):filteredEnv)
 
 createXdgPath :: a -> IO String
 createXdgPath _ = do
     userid <- PU.getRealUserID
     return $ "/var/run/" ++ show userid
 
+sigHandler :: Signals.Signal -> STM.TMVar Event -> IO ()
+sigHandler sig var = do
+    let e = if sig == Signals.sigINT
+        then SigInt
+        else SigChld
+    STM.atomically $ STM.putTMVar var e
+
 main :: IO ()
 main = do
     -- read the WAYLAND_DISPLAY environment variable
     --
     loggerChan <- STM.newTChanIO
-    signalV <- STM.newEmptyTMVarIO
+    eventV <- STM.newEmptyTMVarIO
 
-    lt <- CC.forkIO $ loggerThread loggerChan
-    st <- CC.forkIO $ signalThread signalV
+    _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
+    _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
+
+    _ <- CC.forkIO $ loggerThread loggerChan
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
@@ -121,7 +127,7 @@ main = do
 
     putStrLn $ "Connecting to " ++ serverPath
 
-    -- Socket.connect serverSock (Socket.SockAddrUnix serverPath)
+    Socket.connect serverSock (Socket.SockAddrUnix serverPath)
 
     -- create socket for the child and start a thread for it
 
@@ -131,9 +137,9 @@ main = do
 
     -- start threads for communication
 
-    -- st <- CC.forkIO $ serverThread serverSock clientSock loggerChan
+    _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
 
-    ct <- CC.forkIO $ clientThread clientSock serverSock loggerChan
+    _ <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
 
     -- fork the child
 
@@ -145,13 +151,17 @@ main = do
     -- there is a SIGINT
 
     M.forever $ do
-        set <- STM.atomically $  STM.takeTMVar signalV
+        e <- STM.atomically $ STM.takeTMVar eventV
 
-        M.when (Signals.inSignalSet Signals.sigINT set) $ putStrLn "sigINT received"
-        M.when (Signals.inSignalSet Signals.sigCHLD set) $ putStrLn "sigCHLD received"
+        case e of
+            SigInt -> putStrLn "sigINT received"
+            SigChld -> putStrLn "sigCHLD received"
+            ServerClosedSocket -> do
+                putStrLn "server closed socket"
+                Signals.signalProcess Signals.sigINT pid
+            ClientClosedSocket -> putStrLn "client closed socket"
 
-
-    -- in case of SIGINT, send the same signal to the child and terminate
-
-    Signals.signalProcess Signals.sigINT pid
+        -- all these should cause us to exit
+        putStrLn "Exiting wayland-tracker"
+        Exit.exitSuccess
 
