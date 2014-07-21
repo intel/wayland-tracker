@@ -26,13 +26,19 @@ import qualified Numeric as N
 import qualified Text.XML.Light as X
 import qualified Data.Maybe as Maybe
 
+import ParseWaylandXML
+
 -- messages contain header and a list of data / fd blocks
 
 data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 }
 
 data WMessageBlockType = WFD | WInt | WUInt | WFixed | WObject | WNewId | WString | WArray
 
-data WMessageBlock = WMessageBlock { start :: Int, blockLength :: Int, blockType :: WMessageBlockType }
+data WMessageBlock = WMessageBlock {
+    start :: Int,
+    blockLength :: Int,
+    blockType :: WMessageBlockType
+}
 
 type WXmlModel = [WMessageBlockType]
 
