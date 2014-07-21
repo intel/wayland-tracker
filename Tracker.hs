@@ -23,8 +23,8 @@ import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as T
 import qualified Control.Monad.Error as ET
 import qualified Numeric as N
-import qualified Text.XML.Light as X
 import qualified Data.Maybe as Maybe
+import qualified Data.Map.Strict as DM
 
 import ParseWaylandXML
 
@@ -48,6 +48,8 @@ data Message = ClientMessage WMessage | ServerMessage WMessage
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
+
+type InterfaceMap = DM.Map String WInterfaceDescription
 
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
@@ -217,24 +219,39 @@ parseProtocol root = (events, requests)
         events = undefined
         requests = undefined
 
+
+addMapping :: String -> InterfaceMap -> Maybe InterfaceMap
+addMapping d mapping = do
+    is <- parseWaylandXML d
+    let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) is
+    let exists = not $ DM.null $ DM.intersection m mapping
+    if exists
+        then Nothing
+        else Just $ DM.union mapping m
+
+
+readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe (InterfaceMap))
+readXmlData [] mapping = return $ Just mapping
+readXmlData (xf:xfs) mapping = do
+    d <- readFile xf
+    let newMapping = addMapping d mapping
+    case newMapping of
+        Nothing -> return Nothing
+        Just m -> readXmlData xfs m
+
+
 runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
 runApplication xfs lt lf cmd cmdargs = do
 
     -- read the protocol file(s)
 
-    xmlFile <- readFile $ head xfs
+    maybeInterfaceMap <- readXmlData xfs DM.empty
 
-    let interfaces = parseWaylandXML xmlFile
-
-{-
-    let xmlDoc = X.parseXMLDoc xmlFile
-
-    M.when (Maybe.isNothing xmlDoc) $ do
-        putStrLn "Error parsing the XML file"
+    ET.when (Maybe.isNothing maybeInterfaceMap) $ do
+        putStrLn "reading or parsing of XML files failed"
         Exit.exitFailure
 
-    let (events, requests) = parseProtocol $ Maybe.fromJust xmlDoc
--}
+    let interfaceMap = Maybe.fromJust maybeInterfaceMap
 
     -- read the WAYLAND_DISPLAY environment variable
 

@@ -1,9 +1,9 @@
 module ParseWaylandXML (
     parseWaylandXML,
-    WArgumentType(WInt,WUint,WFixed,WString,WObject,WNewId,WArray,WFd),
-    WArgumentDescription,
-    WMessageDescription,
-    WInterfaceDescription,
+    WArgumentType(..),
+    WArgumentDescription(..),
+    WMessageDescription(..),
+    WInterfaceDescription(..),
     WMessageMap)
 
 where
