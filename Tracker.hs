@@ -25,6 +25,7 @@ import qualified Control.Monad.Error as ET
 import qualified Numeric as N
 import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as DM
+import qualified Data.IntMap as IM
 
 import ParseWaylandXML
 
@@ -252,6 +253,18 @@ runApplication xfs lt lf cmd cmdargs = do
         Exit.exitFailure
 
     let interfaceMap = Maybe.fromJust maybeInterfaceMap
+
+    -- check that the global object wl_display exists in the map
+
+    let maybeDisplay = DM.lookup "wl_display" interfaceMap
+
+    ET.when (Maybe.isNothing maybeDisplay) $ do
+        putStrLn "required global wl_display not found"
+        Exit.exitFailure
+
+    let display = Maybe.fromJust maybeDisplay
+
+    let objectMap = IM.insert 1 display IM.empty
 
     -- read the WAYLAND_DISPLAY environment variable
 
