@@ -12,12 +12,14 @@ import qualified Text.XML.Light as XML
 import qualified Data.IntMap as IM
 import qualified Data.List as L
 import qualified Data.Map.Strict as DM
+import qualified Data.Maybe as Maybe
 
 data WArgumentType = WInt | WUint | WFixed | WString | WObject | WNewId | WArray | WFd deriving (Eq, Show)
 
 data WArgumentDescription = WArgumentDescription {
     argDescrName :: String,
-    argDescrType :: WArgumentType
+    argDescrType :: WArgumentType,
+    argDescrInterface :: String
 } deriving (Eq, Show)
 
 data WMessageDescription = WMessageDescription {
@@ -45,7 +47,8 @@ parseArgument e = do
     argName <- XML.findAttr (XML.QName "name" Nothing Nothing) e
     argTypeString <- XML.findAttr (XML.QName "type" Nothing Nothing) e
     argType <- DM.lookup argTypeString argumentMap
-    return $ WArgumentDescription argName argType
+    let argInterface = Maybe.fromMaybe "" (XML.findAttr (XML.QName "interface" Nothing Nothing) e)
+    return $ WArgumentDescription argName argType argInterface
 
 
 parseMessage :: XML.Element -> Maybe WMessageDescription
@@ -74,7 +77,7 @@ parseInterface e = do
         xmlEvents = XML.findElements (XML.QName "event" Nothing Nothing)
 
         messageMap :: [WMessageDescription] -> WMessageMap
-        messageMap = IM.fromList . L.zip [1..]
+        messageMap = IM.fromList . L.zip [0..] -- opcodes start from 0
 
 
 parseWaylandXML :: String -> Maybe [WInterfaceDescription]

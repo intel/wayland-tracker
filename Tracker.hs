@@ -31,24 +31,20 @@ import ParseWaylandXML
 
 -- messages contain header and a list of data / fd blocks
 
-data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 }
+data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 } deriving (Eq, Show)
 
 data WMessageBlock = WMessageBlock {
     start :: Int,
     dataLength :: Int,
     blockType :: WArgumentType,
     dataFd :: Int
-}
+} deriving (Eq, Show)
 
-data MessageType = Request | Event
+data MessageType = Request | Event deriving (Eq, Show)
 
-type WXmlModel = [WArgumentType]
+data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString deriving (Eq, Show)
 
-type WMessageModel = [WMessageBlock]
-
-data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString
-
-data Message = ClientMessage WMessage | ServerMessage WMessage
+data Message = ClientMessage WMessage | ServerMessage WMessage deriving (Eq, Show)
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
@@ -76,11 +72,13 @@ loggerThread om chan =
             x <- STM.atomically $ STM.readTChan input
             case x of
                 ClientMessage (WMessage header blocks bs) -> do
-                        putStrLn "request:"
-                        dumpByteString bs
+                        -- putStrLn "request:"
+                        -- dumpByteString bs
+                        return ()
                 ServerMessage (WMessage header blocks bs) -> do
-                        putStrLn "event:"
-                        dumpByteString bs
+                        -- putStrLn "event:"
+                        -- dumpByteString bs
+                        return ()
 
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
 parseHeader = BG.runGet process
@@ -104,6 +102,7 @@ parseWord = BG.runGet process
 
 readFd :: Socket.Socket -> IO (Int)
 readFd s = do
+    putStrLn "readFD"
     fd <- Socket.recvFd s
     return $ fromIntegral fd
 
@@ -122,7 +121,10 @@ readArray s = do
     case mSize of
         (Right wsize, _) -> do
             let dataSize = fromIntegral wsize
-            let paddedSize = dataSize + (4 - (rem dataSize 4))
+            let paddedSize = if (rem dataSize 4) == 0
+                then dataSize
+                else dataSize + (4 - (rem dataSize 4))
+            putStrLn $ "reading array of length " ++ show dataSize ++ ", with padding " ++ show paddedSize
             secondPart <- BSocket.recv s paddedSize
             ET.when (BS.null secondPart) $ putStrLn "Socket was closed (TODO: handle this)"
             let fullData = BS.append firstPart secondPart
@@ -174,29 +176,36 @@ readBlocks s (a:as) blocks bs start remaining = do
 readFullMessage :: Socket.Socket -> WHeader -> WMessageDescription -> BS.ByteString -> Int -> IO WMessage
 readFullMessage s h d bs remaining = do
     (blocks, bytes) <- readBlocks s (msgDescrArgs d) [] bs 0 remaining
-    return $ WMessage h (reverse blocks) bytes
 
-loop :: CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
-loop om t inputSock outputSock logger =  do
-    -- read from client socket
-{-
-    putStrLn "recvfd from socket"
-    fd <- Err.catchIOError (Socket.recvFd inputSock) (\_ -> return (-1))
-    putStrLn $ "result: " ++ show fd
--}
+    let dataSize = BS.length bytes - 8
+
+    let missing = remaining - dataSize
+    putStrLn $ "read " ++ show (BS.length bytes - 8) ++ " bytes of " ++ show remaining
+
+    if (missing > 0) then do
+        extra <- BSocket.recv s missing
+        let allBytes = BS.append bytes extra
+        putStrLn "ERROR: message size did not match the contents"
+        print d
+        dumpByteString allBytes
+        return $ WMessage h (reverse blocks) allBytes
+    else
+        return $ WMessage h (reverse blocks) bytes
+
+loop :: InterfaceMap -> CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
+loop im om t inputSock outputSock logger =  do
 
     -- Some messages contain file descriptors. We cannot just read
     -- all there is because the file descriptors get closed by kernel.
     -- Instead, we need to read until we know the message format and then
     -- read until the fd. The fd is then received via recvFd.
 
-    -- Wayland message header size is 8 bytes.
-
     -- r is either the resulting msg or an error
     r <- ET.runErrorT $ readData inputSock
 
     case r of
-        (Left _) -> return ()
+        (Left err) -> do
+            putStrLn $ "Error: " ++ err
         (Right msg) -> do
             -- write message to the other socket
             writeData outputSock msg
@@ -206,10 +215,9 @@ loop om t inputSock outputSock logger =  do
                 Event -> STM.atomically $ T.writeTChan logger (ServerMessage msg)
                 Request -> STM.atomically $ T.writeTChan logger (ClientMessage msg)
 
-            loop om t inputSock outputSock logger
+            loop im om t inputSock outputSock logger
 
     return ()
-
 
     -- if the socket is no longer connected, end the thread
     -- M.unless (BS.null header) $ processMsg header
@@ -218,7 +226,22 @@ loop om t inputSock outputSock logger =  do
         readData :: Socket.Socket -> ET.ErrorT String IO WMessage
         readData sock = do
 
+            let direction = if t == Request
+                then "Request"
+                else "Event"
+
+            -- Wayland message header size is 8 bytes.
             header <- ET.liftIO $ BSocket.recv sock 8
+
+            {-
+            ET.liftIO $ case t of
+                Request -> do
+                    putStrLn "read header from client:"
+                    dumpByteString header
+                Event -> do
+                    putStrLn "read header from server:"
+                    dumpByteString header
+            -}
 
             ET.when (BS.null header) $ ET.throwError $ ET.strMsg "socket was closed"
 
@@ -231,23 +254,35 @@ loop om t inputSock outputSock logger =  do
 
             let remaining = fromIntegral $ msgSize - 8
 
+
+            ET.liftIO $ print (objectId, opCode, msgSize)
+
             -- get the XML model based on the opcode
 
             -- TODO: do not make these exceptions fatal
 
             mInterface <- ET.liftIO $ lookupMapping om (fromIntegral objectId)
-            ET.when (Maybe.isNothing mInterface) $ ET.throwError $ ET.strMsg "unknown objectId"
+            ET.when (Maybe.isNothing mInterface) $ ET.throwError $ ET.strMsg "unknown objectId: " ++ show (fromIntegral objectId)
 
             let mMessage = IM.lookup (fromIntegral opCode) (getMap t $ Maybe.fromJust mInterface)
-            ET.when (Maybe.isNothing mMessage) $ ET.throwError $ ET.strMsg "unknown opcode"
+            ET.when (Maybe.isNothing mMessage) $ ET.throwError $ ET.strMsg "unknown opcode: " ++ show (fromIntegral opCode)
 
             -- read data in blocks so that we don't accidentally go over fd
             let h = WHeader objectId msgSize opCode
 
-            wmsg <- ET.liftIO $ readFullMessage inputSock h (Maybe.fromJust mMessage) header remaining
+            ET.liftIO $ putStrLn $ direction ++ ": " ++ show (interfaceDescrName $ Maybe.fromJust mInterface) ++ " : " ++ show (msgDescrName $ Maybe.fromJust mMessage)
 
-            -- input <- ET.liftIO $ BSocket.recv inputSock remaining
-            -- ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
+            wmsg@(WMessage header blocks bs) <- ET.liftIO $ readFullMessage inputSock h (Maybe.fromJust mMessage) header remaining
+
+            -- if the message contains new_id blocks, we need to allocate objects for them
+
+            ET.liftIO $ allocateObjects im (Maybe.fromJust mMessage) blocks bs
+
+            -- if the server tells that some objects have died, remove them
+
+{-
+            input <- ET.liftIO $ BSocket.recv inputSock remaining
+            ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
 
             {-
             ET.liftIO $ putStrLn $ "message header: id=" ++ show objectId ++ ", size=" ++ show msgSize ++ ", opcode=" ++ show opCode
@@ -255,8 +290,9 @@ loop om t inputSock outputSock logger =  do
             ET.liftIO $ dumpByteString input
             -}
 
-            -- let msgData = BS.append header input
-            -- let wmsg = WMessage h (parseMessage undefined input) msgData
+            let msgData = BS.append header input
+            let wmsg = WMessage h [] msgData
+-}
 
             return wmsg
 
@@ -266,9 +302,10 @@ loop om t inputSock outputSock logger =  do
 
             -- go through the blocks for FD passing
 
-            s <- BSocket.send sock bs
+            -- CC.threadDelay 1000
 
-            CC.threadDelay 100000
+            -- dumpByteString bs
+            s <- BSocket.send sock bs
 
             return ()
 
@@ -278,15 +315,46 @@ loop om t inputSock outputSock logger =  do
             Event -> interfaceEvents interface
 
 
-clientThread :: STM.TMVar Event -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-clientThread eventV om clientSock serverSock loggerChan = do
-    loop om Request clientSock serverSock loggerChan
+        allocateObjects :: InterfaceMap -> WMessageDescription -> [WMessageBlock] -> BS.ByteString -> IO ()
+        allocateObjects im (WMessageDescription name args) blocks bs =
+            if name == "bind"
+                then return () -- server will advertize this?
+                else createObjects args blocks bs
+            where
+                createObjects [] [] bs = return ()
+                createObjects (a:as) (b:blocks) bs = do
+                    case b of
+                        (WMessageBlock start _ WNewId _) -> do
+                            let interfaceName = argDescrInterface a
+                            let newIdBs = ((BS.take 4) . (BS.drop (8+start))) bs
+                            let mNewId = parseWord newIdBs
+                            case mNewId of
+                                (Right newId, _) -> do
+                                    let mInterface = DM.lookup interfaceName im
+                                    ET.when (Maybe.isNothing mInterface) $ do
+                                        putStrLn $ "failed to find interface from map: " ++ interfaceName
+                                        Exit.exitFailure
+
+                                    insertMapping om (fromIntegral newId) (Maybe.fromJust mInterface)
+                                    putStrLn $ "new object mapping: " ++ show (fromIntegral newId) ++ " -> " ++ interfaceName
+                                    createObjects as blocks bs
+                                (Left _, _) -> do
+                                    putStrLn "Could not read new id from bytestring"
+                            createObjects as blocks bs
+                        _ -> createObjects as blocks bs
+
+
+
+
+clientThread :: STM.TMVar Event -> InterfaceMap -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+clientThread eventV im om clientSock serverSock loggerChan = do
+    loop im om Request clientSock serverSock loggerChan
     STM.atomically $ STM.putTMVar eventV ClientClosedSocket
 
 
-serverThread :: STM.TMVar Event -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-serverThread eventV om serverSock clientSock loggerChan = do
-    loop om Event serverSock clientSock loggerChan
+serverThread :: STM.TMVar Event -> InterfaceMap -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+serverThread eventV im om serverSock clientSock loggerChan = do
+    loop im om Event serverSock clientSock loggerChan
     STM.atomically $ STM.putTMVar eventV ServerClosedSocket
 
 
@@ -414,9 +482,9 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- start threads for communication
 
-    _ <- CC.forkIO $ serverThread eventV objectMap serverSock clientSock loggerChan
+    _ <- CC.forkIO $ serverThread eventV interfaceMap objectMap serverSock clientSock loggerChan
 
-    _ <- CC.forkIO $ clientThread eventV objectMap clientSock serverSock loggerChan
+    _ <- CC.forkIO $ clientThread eventV interfaceMap objectMap clientSock serverSock loggerChan
 
     -- fork the child
 
