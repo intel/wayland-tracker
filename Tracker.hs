@@ -35,9 +35,12 @@ data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word1
 
 data WMessageBlock = WMessageBlock {
     start :: Int,
-    blockLength :: Int,
-    blockType :: WArgumentType
+    dataLength :: Int,
+    blockType :: WArgumentType,
+    dataFd :: Int
 }
+
+data MessageType = Request | Event
 
 type WXmlModel = [WArgumentType]
 
@@ -50,7 +53,11 @@ data Message = ClientMessage WMessage | ServerMessage WMessage
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
 
+-- mapping of interface names to interfaces
 type InterfaceMap = DM.Map String WInterfaceDescription
+
+-- mapping of bound object ids to interfaces
+type ObjectMap = IM.IntMap WInterfaceDescription
 
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
@@ -59,8 +66,8 @@ dumpByteString bs = do
     where
         bytes = BS.unpack bs
 
-loggerThread :: STM.TChan Message -> IO ()
-loggerThread chan =
+loggerThread :: CC.MVar ObjectMap -> STM.TChan Message -> IO ()
+loggerThread om chan =
 
     M.forever $ processData chan
 
@@ -75,31 +82,102 @@ loggerThread chan =
                         putStrLn "event:"
                         dumpByteString bs
 
-parseClientMessage :: WMessage -> Message
-parseClientMessage = ClientMessage
-
-parseServerMessage :: WMessage -> Message
-parseServerMessage = ServerMessage
-
-parseMessage :: WXmlModel -> BS.ByteString -> [WMessageBlock]
-parseMessage model bs = msgblocks
-    where
-        dataLength = BS.length bs
-        msgblocks = [WMessageBlock 0 dataLength WString]
-
-
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
 parseHeader = BG.runGet process
     where
         process :: BG.Get (W.Word32, W.Word16, W.Word16)
         process = do
-            senderId <- BG.getWord32le
-            msgSize <- BG.getWord16le
-            msgOpcode <- BG.getWord16le
+            senderId <- BG.getWord32host
+            msgSize <- BG.getWord16host
+            msgOpcode <- BG.getWord16host
             return (senderId, msgSize, msgOpcode)
 
-loop :: (WMessage -> Message) -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
-loop f inputSock outputSock logger =  do
+
+parseWord :: BS.ByteString -> (Either String W.Word32, BS.ByteString)
+parseWord = BG.runGet process
+    where
+        process :: BG.Get W.Word32
+        process = do
+            word <- BG.getWord32host
+            return word
+
+
+readFd :: Socket.Socket -> IO (Int)
+readFd s = do
+    fd <- Socket.recvFd s
+    return $ fromIntegral fd
+
+readPrimitive :: Socket.Socket -> Int -> IO (BS.ByteString)
+readPrimitive s len = do
+    input <- BSocket.recv s len
+    ET.when (BS.null input) $ putStrLn "Socket was closed (TODO: handle this)"
+    return input
+
+readArray :: Socket.Socket -> IO (BS.ByteString, Int, Int)
+readArray s = do
+    firstPart <- BSocket.recv s 4
+    ET.when (BS.null firstPart) $ putStrLn "Socket was closed (TODO: handle this)"
+    let mSize = parseWord firstPart
+
+    case mSize of
+        (Right wsize, _) -> do
+            let dataSize = fromIntegral wsize
+            let paddedSize = dataSize + (4 - (rem dataSize 4))
+            secondPart <- BSocket.recv s paddedSize
+            ET.when (BS.null secondPart) $ putStrLn "Socket was closed (TODO: handle this)"
+            let fullData = BS.append firstPart secondPart
+            return (fullData, dataSize, paddedSize)
+
+        (Left _, _) -> do
+            putStrLn "Failed to parse size word (TODO: handle this)"
+            return (BS.empty, 0, 0)
+
+
+readBlocks :: Socket.Socket -> [WArgumentDescription] -> [WMessageBlock] -> BS.ByteString -> Int -> Int -> IO ([WMessageBlock], BS.ByteString)
+readBlocks s [] blocks bs start remaining = return (blocks, bs)
+readBlocks s (a:as) blocks bs start remaining = do
+    case (argDescrType a) of
+        WInt -> do
+            input <- readPrimitive s 4
+            let b = WMessageBlock start 4 WInt 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
+        WUint -> do
+            input <- readPrimitive s 4
+            let b = WMessageBlock start 4 WUint 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
+        WFixed -> do
+            input <- readPrimitive s 4
+            let b = WMessageBlock start 4 WFixed 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
+        WString -> do
+            (input, dataSize, paddedSize) <- readArray s
+            let b = WMessageBlock start dataSize WString 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + paddedSize) (remaining - paddedSize)
+        WObject -> do
+            input <- readPrimitive s 4
+            let b = WMessageBlock start 4 WObject 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
+        WNewId -> do
+            input <- readPrimitive s 4
+            let b = WMessageBlock start 4 WNewId 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
+        WArray -> do
+            (input, dataSize, paddedSize) <- readArray s
+            let b = WMessageBlock start dataSize WString 0
+            readBlocks s as (b:blocks) (BS.append bs input) (start + paddedSize) (remaining - paddedSize)
+        WFd -> do
+            fd <- readFd s
+            let b =  WMessageBlock start 0 WFd fd
+            readBlocks s as (b:blocks) bs start remaining
+
+
+readFullMessage :: Socket.Socket -> WHeader -> WMessageDescription -> BS.ByteString -> Int -> IO WMessage
+readFullMessage s h d bs remaining = do
+    (blocks, bytes) <- readBlocks s (msgDescrArgs d) [] bs 0 remaining
+    return $ WMessage h (reverse blocks) bytes
+
+loop :: CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
+loop om t inputSock outputSock logger =  do
     -- read from client socket
 {-
     putStrLn "recvfd from socket"
@@ -124,8 +202,11 @@ loop f inputSock outputSock logger =  do
             writeData outputSock msg
 
             -- log the message
-            STM.atomically $ T.writeTChan logger (f msg)
-            loop f inputSock outputSock logger
+            case t of
+                Event -> STM.atomically $ T.writeTChan logger (ServerMessage msg)
+                Request -> STM.atomically $ T.writeTChan logger (ClientMessage msg)
+
+            loop om t inputSock outputSock logger
 
     return ()
 
@@ -150,11 +231,23 @@ loop f inputSock outputSock logger =  do
 
             let remaining = fromIntegral $ msgSize - 8
 
-            -- TODO: get the XML model based on the opcode
-            -- read data in blocks so that we don't accidentally go over fd
+            -- get the XML model based on the opcode
 
-            input <- ET.liftIO $ BSocket.recv inputSock remaining
-            ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
+            -- TODO: do not make these exceptions fatal
+
+            mInterface <- ET.liftIO $ lookupMapping om (fromIntegral objectId)
+            ET.when (Maybe.isNothing mInterface) $ ET.throwError $ ET.strMsg "unknown objectId"
+
+            let mMessage = IM.lookup (fromIntegral opCode) (getMap t $ Maybe.fromJust mInterface)
+            ET.when (Maybe.isNothing mMessage) $ ET.throwError $ ET.strMsg "unknown opcode"
+
+            -- read data in blocks so that we don't accidentally go over fd
+            let h = WHeader objectId msgSize opCode
+
+            wmsg <- ET.liftIO $ readFullMessage inputSock h (Maybe.fromJust mMessage) header remaining
+
+            -- input <- ET.liftIO $ BSocket.recv inputSock remaining
+            -- ET.when (BS.null input) $ ET.throwError $ ET.strMsg "socket was closed"
 
             {-
             ET.liftIO $ putStrLn $ "message header: id=" ++ show objectId ++ ", size=" ++ show msgSize ++ ", opcode=" ++ show opCode
@@ -162,9 +255,8 @@ loop f inputSock outputSock logger =  do
             ET.liftIO $ dumpByteString input
             -}
 
-            let h = WHeader objectId msgSize opCode
-            let msgData = BS.append header input
-            let wmsg = WMessage h (parseMessage undefined input) msgData
+            -- let msgData = BS.append header input
+            -- let wmsg = WMessage h (parseMessage undefined input) msgData
 
             return wmsg
 
@@ -180,16 +272,21 @@ loop f inputSock outputSock logger =  do
 
             return ()
 
+        getMap :: MessageType -> WInterfaceDescription -> WMessageMap
+        getMap messageType interface = case messageType of
+            Request -> interfaceRequests interface
+            Event -> interfaceEvents interface
 
-clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-clientThread eventV clientSock serverSock loggerChan = do
-    loop parseClientMessage clientSock serverSock loggerChan
+
+clientThread :: STM.TMVar Event -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+clientThread eventV om clientSock serverSock loggerChan = do
+    loop om Request clientSock serverSock loggerChan
     STM.atomically $ STM.putTMVar eventV ClientClosedSocket
 
 
-serverThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-serverThread eventV serverSock clientSock loggerChan = do
-    loop parseServerMessage serverSock clientSock loggerChan
+serverThread :: STM.TMVar Event -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
+serverThread eventV om serverSock clientSock loggerChan = do
+    loop om Event serverSock clientSock loggerChan
     STM.atomically $ STM.putTMVar eventV ServerClosedSocket
 
 
@@ -215,21 +312,6 @@ sigHandler sig var = do
         else SigChld
     STM.atomically $ STM.putTMVar var e
 
-parseProtocol root = (events, requests)
-    where
-        events = undefined
-        requests = undefined
-
-
-addMapping :: String -> InterfaceMap -> Maybe InterfaceMap
-addMapping d mapping = do
-    is <- parseWaylandXML d
-    let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) is
-    let exists = not $ DM.null $ DM.intersection m mapping
-    if exists
-        then Nothing
-        else Just $ DM.union mapping m
-
 
 readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe (InterfaceMap))
 readXmlData [] mapping = return $ Just mapping
@@ -239,6 +321,37 @@ readXmlData (xf:xfs) mapping = do
     case newMapping of
         Nothing -> return Nothing
         Just m -> readXmlData xfs m
+
+    where
+        addMapping :: String -> InterfaceMap -> Maybe InterfaceMap
+        addMapping d imap = do
+            is <- parseWaylandXML d
+            let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) is
+            let exists = not $ DM.null $ DM.intersection m imap
+            if exists
+                then Nothing
+                else Just $ DM.union imap m
+
+
+-- functions for handling shared state in object map
+
+lookupMapping :: CC.MVar ObjectMap -> Int -> IO (Maybe WInterfaceDescription)
+lookupMapping m objectId = do
+    mapping <- CC.takeMVar m
+    CC.putMVar m mapping
+    return $ IM.lookup objectId mapping
+
+insertMapping :: CC.MVar ObjectMap -> Int -> WInterfaceDescription -> IO ()
+insertMapping m objectId interface = do
+    mapping <- CC.takeMVar m
+    let newMapping = IM.insert objectId interface mapping
+    CC.putMVar m newMapping
+
+removeMapping :: CC.MVar ObjectMap -> Int -> IO ()
+removeMapping m objectId = do
+    mapping <- CC.takeMVar m
+    let newMapping = IM.delete objectId mapping
+    CC.putMVar m newMapping
 
 
 runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
@@ -264,7 +377,9 @@ runApplication xfs lt lf cmd cmdargs = do
 
     let display = Maybe.fromJust maybeDisplay
 
-    let objectMap = IM.insert 1 display IM.empty
+    -- initialize object map with known global mapping 1 -> "wl_display"
+
+    objectMap <- CC.newMVar $ IM.insert 1 display IM.empty
 
     -- read the WAYLAND_DISPLAY environment variable
 
@@ -274,7 +389,7 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ loggerThread loggerChan
+    _ <- CC.forkIO $ loggerThread objectMap loggerChan
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
@@ -299,9 +414,9 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- start threads for communication
 
-    _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
+    _ <- CC.forkIO $ serverThread eventV objectMap serverSock clientSock loggerChan
 
-    _ <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
+    _ <- CC.forkIO $ clientThread eventV objectMap clientSock serverSock loggerChan
 
     -- fork the child
 
