@@ -1,6 +1,6 @@
 module ParseWaylandXML (
     parseWaylandXML,
-    WArgumentType,
+    WArgumentType(WInt,WUint,WFixed,WString,WObject,WNewId,WArray,WFd),
     WArgumentDescription,
     WMessageDescription,
     WInterfaceDescription,
@@ -85,11 +85,3 @@ parseWaylandXML fileData = do
     where
         xmlInterfaces :: XML.Element -> [XML.Element]
         xmlInterfaces = XML.findElements (XML.QName "interface" Nothing Nothing)
-
-
-main = do
-    file <- readFile "wayland.xml"
-
-    case parseWaylandXML file of
-        Nothing -> putStrLn "Failed to parse XML file"
-        Just interfaces -> print interfaces

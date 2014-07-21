@@ -1,4 +1,4 @@
-module Main where
+module Tracker where
 
 import qualified Data.Word as W
 -- import qualified Foreign.C.Types as C
@@ -32,15 +32,13 @@ import ParseWaylandXML
 
 data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 }
 
-data WMessageBlockType = WFD | WInt | WUInt | WFixed | WObject | WNewId | WString | WArray
-
 data WMessageBlock = WMessageBlock {
     start :: Int,
     blockLength :: Int,
-    blockType :: WMessageBlockType
+    blockType :: WArgumentType
 }
 
-type WXmlModel = [WMessageBlockType]
+type WXmlModel = [WArgumentType]
 
 type WMessageModel = [WMessageBlock]
 
@@ -219,12 +217,16 @@ parseProtocol root = (events, requests)
         events = undefined
         requests = undefined
 
-main :: IO ()
-main = do
+runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
+runApplication xfs lt lf cmd cmdargs = do
 
     -- read the protocol file(s)
 
-    xmlFile <- readFile "xml/wayland.xml"
+    xmlFile <- readFile $ head xfs
+
+    let interfaces = parseWaylandXML xmlFile
+
+{-
     let xmlDoc = X.parseXMLDoc xmlFile
 
     M.when (Maybe.isNothing xmlDoc) $ do
@@ -232,6 +234,7 @@ main = do
         Exit.exitFailure
 
     let (events, requests) = parseProtocol $ Maybe.fromJust xmlDoc
+-}
 
     -- read the WAYLAND_DISPLAY environment variable
 
@@ -272,7 +275,7 @@ main = do
 
     -- fork the child
 
-    pid <- Process.forkProcess $ execProcess "weston-terminal" [] trackerSock
+    pid <- Process.forkProcess $ execProcess cmd cmdargs trackerSock
 
     Socket.close trackerSock
 
