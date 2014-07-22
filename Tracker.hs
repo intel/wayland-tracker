@@ -26,8 +26,12 @@ import qualified Numeric as N
 import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
+import qualified Data.ByteString.UTF8 as U
+import qualified Data.List as List
 
 import ParseWaylandXML
+
+-- import Debug.Trace
 
 -- messages contain header and a list of data / fd blocks
 
@@ -44,7 +48,7 @@ data MessageType = Request | Event deriving (Eq, Show)
 
 data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString deriving (Eq, Show)
 
-data Message = ClientMessage WMessage | ServerMessage WMessage deriving (Eq, Show)
+data Message = ClientMessage WMessageDescription WMessage | ServerMessage WMessageDescription WMessage deriving (Eq, Show)
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
@@ -71,11 +75,13 @@ loggerThread om chan =
         processData input = do
             x <- STM.atomically $ STM.readTChan input
             case x of
-                ClientMessage (WMessage header blocks bs) -> do
+                ClientMessage descr msg@(WMessage header blocks bs) -> do
+                        dumpMessage descr msg
                         -- putStrLn "request:"
                         -- dumpByteString bs
                         return ()
-                ServerMessage (WMessage header blocks bs) -> do
+                ServerMessage descr msg@(WMessage header blocks bs) -> do
+                        dumpMessage descr msg
                         -- putStrLn "event:"
                         -- dumpByteString bs
                         return ()
@@ -98,6 +104,51 @@ parseWord = BG.runGet process
         process = do
             word <- BG.getWord32host
             return word
+
+dumpMessage :: WMessageDescription -> WMessage -> IO ()
+dumpMessage (WMessageDescription name args) (WMessage header blocks bs) = do
+    putStrLn $ "Message name: " ++ name ++ ", object: " ++ (show $ object header) ++ ", opcode: " ++ (show $ opcode header)
+    putStrLn $ "Message size: " ++ show (size header) ++ "/" ++ show (BS.length bs)
+    printBlocks args blocks
+    putStrLn "Message data:"
+    dumpByteString bs
+
+    where
+        printBlocks [] [] = return ()
+        printBlocks ((WArgumentDescription argName argType argInterface):as) ((WMessageBlock start len _ fd):blocks) = do
+            putStrLn $ "  Argument name: " ++ argName
+            putStrLn $ "           data length: " ++ show len
+            putStrLn $ "           start position: " ++ show start
+            case argType of
+                WInt -> do
+                    putStrLn "           type: Int"
+                    let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
+                    putStrLn $ "           value: " ++ value
+                WUint -> do
+                    putStrLn "           type: UInt"
+                    let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
+                    putStrLn $ "           value: " ++ value
+                WString -> do
+                    putStrLn "           type: String"
+                    let value = Maybe.fromJust $ parseMessageString bs start
+                    putStrLn $ "           value: " ++ value
+                WArray -> do
+                    putStrLn "           type: Array"
+                WNewId -> do
+                    putStrLn "           type: NewId"
+                    let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
+                    putStrLn $ "           value: " ++ value
+                WObject -> do
+                    putStrLn "           type: Object"
+                    let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
+                    putStrLn $ "           value: " ++ value
+                WFd -> do
+                    putStrLn "           type: Object"
+                    putStrLn $ "           value: " ++ show fd
+                WFixed -> do
+                    putStrLn "           type: Fixed"
+
+            printBlocks as blocks
 
 
 readFd :: Socket.Socket -> IO (Int)
@@ -154,7 +205,7 @@ readBlocks s (a:as) blocks bs start remaining = do
         WString -> do
             (input, dataSize, paddedSize) <- readArray s
             let b = WMessageBlock start dataSize WString 0
-            readBlocks s as (b:blocks) (BS.append bs input) (start + paddedSize) (remaining - paddedSize)
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4 + paddedSize) (remaining - paddedSize)
         WObject -> do
             input <- readPrimitive s 4
             let b = WMessageBlock start 4 WObject 0
@@ -166,7 +217,7 @@ readBlocks s (a:as) blocks bs start remaining = do
         WArray -> do
             (input, dataSize, paddedSize) <- readArray s
             let b = WMessageBlock start dataSize WString 0
-            readBlocks s as (b:blocks) (BS.append bs input) (start + paddedSize) (remaining - paddedSize)
+            readBlocks s as (b:blocks) (BS.append bs input) (start + 4 + paddedSize) (remaining - paddedSize)
         WFd -> do
             fd <- readFd s
             let b =  WMessageBlock start 0 WFd fd
@@ -206,14 +257,14 @@ loop im om t inputSock outputSock logger =  do
     case r of
         (Left err) -> do
             putStrLn $ "Error: " ++ err
-        (Right msg) -> do
+        (Right (descr, msg)) -> do
             -- write message to the other socket
             writeData outputSock msg
 
             -- log the message
             case t of
-                Event -> STM.atomically $ T.writeTChan logger (ServerMessage msg)
-                Request -> STM.atomically $ T.writeTChan logger (ClientMessage msg)
+                Event -> STM.atomically $ T.writeTChan logger (ServerMessage descr msg)
+                Request -> STM.atomically $ T.writeTChan logger (ClientMessage descr msg)
 
             loop im om t inputSock outputSock logger
 
@@ -223,7 +274,7 @@ loop im om t inputSock outputSock logger =  do
     -- M.unless (BS.null header) $ processMsg header
 
     where
-        readData :: Socket.Socket -> ET.ErrorT String IO WMessage
+        readData :: Socket.Socket -> ET.ErrorT String IO (WMessageDescription, WMessage)
         readData sock = do
 
             let direction = if t == Request
@@ -267,6 +318,8 @@ loop im om t inputSock outputSock logger =  do
             let mMessage = IM.lookup (fromIntegral opCode) (getMap t $ Maybe.fromJust mInterface)
             ET.when (Maybe.isNothing mMessage) $ ET.throwError $ ET.strMsg "unknown opcode: " ++ show (fromIntegral opCode)
 
+            let msgDescr = Maybe.fromJust mMessage
+
             -- read data in blocks so that we don't accidentally go over fd
             let h = WHeader objectId msgSize opCode
 
@@ -276,7 +329,7 @@ loop im om t inputSock outputSock logger =  do
 
             -- if the message contains new_id blocks, we need to allocate objects for them
 
-            ET.liftIO $ allocateObjects im (Maybe.fromJust mMessage) blocks bs
+            ET.liftIO $ allocateObjects im msgDescr blocks bs
 
             -- if the server tells that some objects have died, remove them
 
@@ -294,7 +347,7 @@ loop im om t inputSock outputSock logger =  do
             let wmsg = WMessage h [] msgData
 -}
 
-            return wmsg
+            return (msgDescr, wmsg)
 
 
         writeData :: Socket.Socket -> WMessage -> IO ()
@@ -316,9 +369,9 @@ loop im om t inputSock outputSock logger =  do
 
 
         allocateObjects :: InterfaceMap -> WMessageDescription -> [WMessageBlock] -> BS.ByteString -> IO ()
-        allocateObjects im (WMessageDescription name args) blocks bs =
+        allocateObjects im msg@(WMessageDescription name args) blocks bs =
             if name == "bind"
-                then return () -- server will advertize this?
+                then processBind im msg blocks bs
                 else createObjects args blocks bs
             where
                 createObjects [] [] bs = return ()
@@ -344,7 +397,87 @@ loop im om t inputSock outputSock logger =  do
                         _ -> createObjects as blocks bs
 
 
+        processBind im msg@(WMessageDescription name args) blocks bs =
+            let mIfaceIndex = List.findIndex (\a -> argDescrName a == "interface") args
+                mNewIdIndex = List.findIndex (\a -> argDescrName a == "id") args
+            in
+                do
+                    case getData mIfaceIndex mNewIdIndex of
+                        Nothing -> do
+                            putStrLn "Error processing bind"
+                        Just (newId, interface) ->
+                            case DM.lookup interface im of
+                                Just i -> do
+                                    insertMapping om (fromIntegral newId) i
+                                    putStrLn $ "new bind mapping: " ++ show (fromIntegral newId) ++ " -> " ++ interface
+                                Nothing -> do
+                                    putStrLn $ "Interface not found in the map: " ++ interface
+            where
+                getData :: Maybe Int -> Maybe Int -> Maybe (W.Word32, String)
+                getData mInterfaceIndex mNewIdIndex = do
+                    interfaceIndex <- mInterfaceIndex
+                    newIdIndex <- mNewIdIndex
+                    let interfaceBlock = blocks !! interfaceIndex
+                    let newIdBlock = blocks !! newIdIndex
+                    interface <- parseMessageString bs $ start interfaceBlock
+                    newId <- parseMessageWord bs $ start newIdBlock
+                    return (newId, interface)
 
+parseMessageString :: BS.ByteString -> Int -> Maybe String
+parseMessageString bs start =
+    case mStrLen of
+        (Left _, _) -> Nothing
+        (Right strLen, _) ->
+            -- strLen - 1, since a NUL byte is included in string lenght
+            let strBytes = ((BS.take $ (fromIntegral strLen)-1) . (BS.drop (strStart + 4))) bs
+            in
+                Just $ U.toString strBytes
+
+    where
+        strStart = 8 + start :: Int
+        strLenBs = ((BS.take 4) . (BS.drop strStart)) bs
+        mStrLen = parseWord strLenBs
+
+parseMessageWord :: BS.ByteString -> Int -> Maybe W.Word32
+parseMessageWord bs start =
+    case mWord of
+        (Left _, _) -> Nothing
+        (Right word, _) -> Just word
+
+    where
+        wordStart = 8 + start
+        wordBs = ((BS.take 4) . (BS.drop wordStart)) bs
+        mWord = parseWord wordBs
+
+
+{-
+Some objects are so called "typeless objects". The scanner generates extra code
+for them, meaning that the message description in the xml protocol files is not
+an accurate description of the message content on the wire.
+-}
+
+isTypelessObject :: WMessageDescription -> Bool
+isTypelessObject (WMessageDescription _ args) = any typeless args
+    where typeless (WArgumentDescription _ t i) = if t == WNewId && i == ""
+            then True
+            else False
+
+fixMessage :: WMessageDescription -> WMessageDescription
+fixMessage msg@(WMessageDescription n args) =
+    if isTypelessObject msg
+        then
+            -- insert new fields before the new_id parameter
+            let beginning = takeWhile (\a -> argDescrType a /= WNewId) args
+                end = dropWhile (\a -> argDescrType a /= WNewId) args
+                newArgs = [ WArgumentDescription "interface" WString "",
+                            WArgumentDescription "version" WUint "" ]
+            in
+                WMessageDescription n (beginning ++ newArgs ++ end)
+        else
+            msg
+
+fixInterface (WInterfaceDescription n rs es) =
+    WInterfaceDescription n (IM.map fixMessage rs) (IM.map fixMessage es)
 
 clientThread :: STM.TMVar Event -> InterfaceMap -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
 clientThread eventV im om clientSock serverSock loggerChan = do
@@ -367,6 +500,7 @@ execProcess path args sock = do
 
     putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
     Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", fd):filteredEnv)
+    -- Process.executeFile path True args (Just filteredEnv)
 
 createXdgPath :: a -> IO String
 createXdgPath _ = do
@@ -394,7 +528,8 @@ readXmlData (xf:xfs) mapping = do
         addMapping :: String -> InterfaceMap -> Maybe InterfaceMap
         addMapping d imap = do
             is <- parseWaylandXML d
-            let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) is
+            let fixedIs = map fixInterface is
+            let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) fixedIs
             let exists = not $ DM.null $ DM.intersection m imap
             if exists
                 then Nothing
