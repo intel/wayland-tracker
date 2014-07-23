@@ -17,10 +17,10 @@ cabal-version:       >=1.10
 
 executable wayland-tracker
   main-is:             Main.hs
-  other-modules:       ParseWaylandXML, Tracker
+  other-modules:       ParseWaylandXML, Tracker, Wayland
   -- other-extensions:
   build-depends:       base >=4.6 && <4.7, mtl, stm, network, unix, bytestring,
                        xml >=1.3 && <1.4, containers >=0.5 && <0.6,
                        binary-strict, cmdtheline, utf8-string
-  -- hs-source-dirs:
+  hs-source-dirs:      ., cbits
   default-language:    Haskell2010

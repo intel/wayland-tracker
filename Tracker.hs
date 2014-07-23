@@ -155,6 +155,7 @@ readFd :: Socket.Socket -> IO (Int)
 readFd s = do
     putStrLn "readFD"
     fd <- Socket.recvFd s
+    putStrLn $ "read FD " ++ show fd
     return $ fromIntegral fd
 
 readPrimitive :: Socket.Socket -> Int -> IO (BS.ByteString)
@@ -219,13 +220,19 @@ readBlocks s (a:as) blocks bs start remaining = do
             let b = WMessageBlock start dataSize WString 0
             readBlocks s as (b:blocks) (BS.append bs input) (start + 4 + paddedSize) (remaining - paddedSize)
         WFd -> do
-            fd <- readFd s
-            let b =  WMessageBlock start 0 WFd fd
+            putStrLn "Going to read a FD"
+            dumpByteString bs
+            -- fd <- readFd s
+            let b =  WMessageBlock start 0 WFd 0 -- fd
             readBlocks s as (b:blocks) bs start remaining
 
 
+containsFd :: WMessageDescription -> Bool
+containsFd (WMessageDescription _ args) = any (\a -> argDescrType a == WFd) args
+
 readFullMessage :: Socket.Socket -> WHeader -> WMessageDescription -> BS.ByteString -> Int -> IO WMessage
 readFullMessage s h d bs remaining = do
+
     (blocks, bytes) <- readBlocks s (msgDescrArgs d) [] bs 0 remaining
 
     let dataSize = BS.length bytes - 8
@@ -250,6 +257,9 @@ loop im om t inputSock outputSock logger =  do
     -- all there is because the file descriptors get closed by kernel.
     -- Instead, we need to read until we know the message format and then
     -- read until the fd. The fd is then received via recvFd.
+
+
+    -- check if the message contains a fd
 
     -- r is either the resulting msg or an error
     r <- ET.runErrorT $ readData inputSock
@@ -355,7 +365,7 @@ loop im om t inputSock outputSock logger =  do
 
             -- go through the blocks for FD passing
 
-            -- CC.threadDelay 1000
+            CC.threadDelay 1000
 
             -- dumpByteString bs
             s <- BSocket.send sock bs
