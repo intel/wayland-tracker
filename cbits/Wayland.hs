@@ -39,9 +39,10 @@ sendToWayland s bs fds = do
         sendData (bytePtr, byteLen) = withArrayLen c_fds $ \fdLen fdArray -> do
             let c_byteLen = fromIntegral byteLen
             let c_fdLen = fromIntegral fdLen
-            sent <- c_sendmsg_wayland socket bytePtr c_byteLen fdArray c_fdLen
-            -- TODO: handle exceptions
-            return sent
+            len <- c_sendmsg_wayland socket bytePtr c_byteLen fdArray c_fdLen
+            if len < 0
+                then ioError $ userError "sendmsg failed"
+                else return len
 
 recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
 recvFromWayland s = allocaArray 4096 $ \cbuf -> do
@@ -49,10 +50,12 @@ recvFromWayland s = allocaArray 4096 $ \cbuf -> do
     alloca $ \nFds_ptr ->
         allocaArray 28 $ \fdArray -> do
             len <- c_recvmsg_wayland socket cbuf 4096 fdArray 28 nFds_ptr
-            -- TODO: handle exceptions
-            bs <- BS.packCStringLen (cbuf, len)
-            nFds <- peek nFds_ptr
-            fds <- peekArray (fromIntegral nFds) fdArray
-            return (bs, (map fromIntegral fds))
+            if len < 0
+                then ioError $ userError "recvmsg failed"
+                else do
+                    bs <- BS.packCStringLen (cbuf, len)
+                    nFds <- peek nFds_ptr
+                    fds <- peekArray (fromIntegral nFds) fdArray
+                    return (bs, (map fromIntegral fds))
     where
         socket = Socket.fdSocket s

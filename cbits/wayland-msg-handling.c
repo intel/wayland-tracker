@@ -2,17 +2,17 @@
 
 #include <stdio.h>
 
-#define MAX_FDS_OUT 28
-#define CLEN        (CMSG_LEN(MAX_FDS_OUT * sizeof(int32_t)))
+#define MAX_FDS 28 /* this constant is from Wayland library */
 
 static void build_cmsg(int *fds, int n_fds, char *data, int *clen)
 {
     struct cmsghdr *cmsg;
     size_t size;
 
-    size = n_fds * sizeof(int32_t);
-    if (size > MAX_FDS_OUT * sizeof(int32_t))
-        size = MAX_FDS_OUT * sizeof(int32_t);
+    if (n_fds > MAX_FDS)
+        n_fds = MAX_FDS;
+
+    size = n_fds * 4;
 
     if (size > 0) {
         cmsg = (struct cmsghdr *) data;
@@ -33,20 +33,17 @@ static int decode_cmsg(int *fds, int bufsize, struct msghdr *msg)
     int n = 0;
     int *fdp = fds;
 
-    for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL;
-         cmsg = CMSG_NXTHDR(msg, cmsg)) {
+    cmsg = CMSG_FIRSTHDR(msg);
 
+    while (cmsg) {
         int n_fds_in_cmsg = 0;
 
-        printf("CMSG block\n");
-
-        if (cmsg->cmsg_level != SOL_SOCKET ||
-            cmsg->cmsg_type != SCM_RIGHTS)
+        if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
+            cmsg = CMSG_NXTHDR(msg, cmsg);
             continue;
+        }
 
         size = cmsg->cmsg_len - CMSG_LEN(0);
-
-        printf("size == %ld, remaining space == %d\n", size, bufsize);
 
         n_fds_in_cmsg = size / sizeof(int32_t);
 
@@ -55,12 +52,12 @@ static int decode_cmsg(int *fds, int bufsize, struct msghdr *msg)
             return -1;
         }
 
-        printf("n_fds in this msg == %d\n", n_fds_in_cmsg);
-
         memcpy(fdp, CMSG_DATA(cmsg), size);
         fdp += n_fds_in_cmsg;
         n += n_fds_in_cmsg;
         bufsize -= size;
+
+        cmsg = CMSG_NXTHDR(msg, cmsg);
     }
 
     return n;
@@ -69,7 +66,7 @@ static int decode_cmsg(int *fds, int bufsize, struct msghdr *msg)
 int recvmsg_wayland(int fd, const char *buf, int bufsize, int *fds,
         int fdbufsize, int *n_fds)
 {
-    char cmsg[CLEN];
+    char cmsg_buf[CMSG_LEN(MAX_FDS*4)];
     struct iovec iov[1];
     struct msghdr msg;
     int len;
@@ -81,8 +78,8 @@ int recvmsg_wayland(int fd, const char *buf, int bufsize, int *fds,
     msg.msg_namelen = 0;
     msg.msg_iov = iov;
     msg.msg_iovlen = 1;
-    msg.msg_control = cmsg;
-    msg.msg_controllen = sizeof(cmsg);
+    msg.msg_control = cmsg_buf;
+    msg.msg_controllen = sizeof(cmsg_buf);
     msg.msg_flags = 0;
 
     do {
@@ -92,17 +89,16 @@ int recvmsg_wayland(int fd, const char *buf, int bufsize, int *fds,
     if (len >= 0)
         *n_fds = decode_cmsg(fds, fdbufsize, &msg);
     else {
-        printf("recvmsg error: %m!\n");
+        /* printf("recvmsg error: %m!\n"); */
         *n_fds = 0;
     }
 
-    printf("recvmsg len %d\n", len);
     return len;
 }
 
 int sendmsg_wayland(int fd, const char *buf, int bufsize, int *fds, int n_fds)
 {
-    char cmsg[CLEN];
+    char cmsg_buf[CMSG_LEN(MAX_FDS*4)];
     struct iovec iov[1];
     struct msghdr msg;
     int clen, len, i;
@@ -110,13 +106,13 @@ int sendmsg_wayland(int fd, const char *buf, int bufsize, int *fds, int n_fds)
     iov[0].iov_base = (void *) buf;
     iov[0].iov_len = bufsize;
 
-    build_cmsg(fds, n_fds, cmsg, &clen);
+    build_cmsg(fds, n_fds, cmsg_buf, &clen);
 
     msg.msg_name = NULL;
     msg.msg_namelen = 0;
     msg.msg_iov = iov;
     msg.msg_iovlen = 1;
-    msg.msg_control = cmsg;
+    msg.msg_control = cmsg_buf;
     msg.msg_controllen = clen;
     msg.msg_flags = 0;
 
@@ -124,8 +120,10 @@ int sendmsg_wayland(int fd, const char *buf, int bufsize, int *fds, int n_fds)
         len = sendmsg(fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
     } while (len == -1 && errno == EINTR);
 
-    if (len == -1)
+    if (len == -1) {
+        /* printf("sendmsg error: %m!\n"); */
         return -1;
+    }
 
     /* close the fds now */
 
