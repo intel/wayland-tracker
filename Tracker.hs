@@ -87,6 +87,25 @@ loggerThread om chan =
                         -- dumpByteString bs
                         return ()
 
+loggerThread2 :: ObjectMap -> InterfaceMap -> STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+loggerThread2 om im chan =
+
+    M.forever $ processData chan
+
+    where
+        processData input = do
+            (t, bs, fds) <- STM.atomically $ STM.readTChan input
+
+            -- Logging file descriptors doesn't make much sense, because the
+            -- fd numbers will anyway change when they are passed over the
+            -- socket.
+
+            let (msgs, descriptors) = parseDataToMessages bs
+            return ()
+
+        parseDataToMessages bs = undefined
+
+
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
 parseHeader = BG.runGet process
     where
@@ -254,29 +273,17 @@ readFullMessage s h d bs remaining = do
 loop :: InterfaceMap -> CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
 loop im om t inputSock outputSock logger =  do
 
-    -- Some messages contain file descriptors. We cannot just read
-    -- all there is because the file descriptors get closed by kernel.
-    -- Instead, we need to read until we know the message format and then
-    -- read until the fd. The fd is then received via recvFd.
-
-
-    -- check if the message contains a fd
-
     let direction = if t == Request
         then "client"
         else "server"
 
-    putStrLn $ "Reading from " ++ direction
-
     (bs, fds) <- recvFromWayland inputSock
 
-    dumpByteString bs
-
-    putStrLn "Writing to output"
+    ET.when (BS.null bs) $ ET.throwError $ ET.strMsg $ "input socket for " ++ direction ++ " was closed"
 
     sent <- sendToWayland outputSock bs fds
 
-    putStrLn "Done!"
+    ET.when (sent == 0) $ ET.throwError $ ET.strMsg $ "output socket for " ++ direction ++ " was closed"
 
     loop im om t inputSock outputSock logger
 
