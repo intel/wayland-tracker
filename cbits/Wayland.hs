@@ -28,7 +28,6 @@ foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
         -> Ptr CInt -- n_fds
         -> IO (Int) -- bytes received
 
-
 sendToWayland :: Socket.Socket -> BS.ByteString -> [Int] -> IO Int
 sendToWayland s bs fds = BS.useAsCStringLen bs sendData
     where
@@ -37,7 +36,9 @@ sendToWayland s bs fds = BS.useAsCStringLen bs sendData
         sendData (bytePtr, byteLen) = withArrayLen c_fds $ \fdLen fdArray -> do
             let c_byteLen = fromIntegral byteLen
             let c_fdLen = fromIntegral fdLen
-            c_sendmsg_wayland socket bytePtr c_byteLen fdArray c_fdLen
+            sent <- c_sendmsg_wayland socket bytePtr c_byteLen fdArray c_fdLen
+            -- TODO: handle exceptions
+            return sent
 
 
 recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
@@ -45,6 +46,7 @@ recvFromWayland s = allocaArray 4096 $ \cbuf -> do
     alloca $ \nFds_ptr ->
         allocaArray 28 $ \fdArray -> do
             len <- c_recvmsg_wayland socket cbuf 4096 fdArray 28 nFds_ptr
+            -- TODO: handle exceptions
             bs <- BS.packCStringLen (cbuf, len)
             nFds <- peek nFds_ptr
             fds <- peekArray (fromIntegral nFds) fdArray
@@ -64,6 +66,3 @@ main = do
     (recvBs, fds) <- recvFromWayland sock2
 
     putStrLn $ "Received: " ++ BSC.unpack recvBs
-
-
-    -- sendToWayland sock1 BS.em
