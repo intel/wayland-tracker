@@ -30,6 +30,7 @@ import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
 
 import ParseWaylandXML
+import Wayland
 
 -- import Debug.Trace
 
