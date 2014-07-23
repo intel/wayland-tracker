@@ -262,6 +262,26 @@ loop im om t inputSock outputSock logger =  do
 
     -- check if the message contains a fd
 
+    let direction = if t == Request
+        then "client"
+        else "server"
+
+    putStrLn $ "Reading from " ++ direction
+
+    (bs, fds) <- recvFromWayland inputSock
+
+    dumpByteString bs
+
+    putStrLn "Writing to output"
+
+    sent <- sendToWayland outputSock bs fds
+
+    putStrLn "Done!"
+
+    loop im om t inputSock outputSock logger
+
+
+{-
     -- r is either the resulting msg or an error
     r <- ET.runErrorT $ readData inputSock
 
@@ -280,6 +300,7 @@ loop im om t inputSock outputSock logger =  do
             loop im om t inputSock outputSock logger
 
     return ()
+-}
 
     -- if the socket is no longer connected, end the thread
     -- M.unless (BS.null header) $ processMsg header

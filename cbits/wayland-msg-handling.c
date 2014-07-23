@@ -1,5 +1,7 @@
 #include "wayland-msg-handling.h"
 
+#include <stdio.h>
+
 #define MAX_FDS_OUT 28
 #define CLEN        (CMSG_LEN(MAX_FDS_OUT * sizeof(int32_t)))
 
@@ -36,11 +38,15 @@ static int decode_cmsg(int *fds, int bufsize, struct msghdr *msg)
 
         int n_fds_in_cmsg = 0;
 
+        printf("CMSG block\n");
+
         if (cmsg->cmsg_level != SOL_SOCKET ||
             cmsg->cmsg_type != SCM_RIGHTS)
             continue;
 
         size = cmsg->cmsg_len - CMSG_LEN(0);
+
+        printf("size == %ld, remaining space == %d\n", size, bufsize);
 
         n_fds_in_cmsg = size / sizeof(int32_t);
 
@@ -48,6 +54,8 @@ static int decode_cmsg(int *fds, int bufsize, struct msghdr *msg)
             /* TODO: close the fds */
             return -1;
         }
+
+        printf("n_fds in this msg == %d\n", n_fds_in_cmsg);
 
         memcpy(fdp, CMSG_DATA(cmsg), size);
         fdp += n_fds_in_cmsg;
@@ -81,11 +89,14 @@ int recvmsg_wayland(int fd, const char *buf, int bufsize, int *fds,
         len = recvmsg(fd, &msg, MSG_CMSG_CLOEXEC);
     } while (len == -1 && errno == EINTR);
 
-    if (len)
+    if (len >= 0)
         *n_fds = decode_cmsg(fds, fdbufsize, &msg);
-    else
+    else {
+        printf("recvmsg error: %m!\n");
         *n_fds = 0;
+    }
 
+    printf("recvmsg len %d\n", len);
     return len;
 }
 

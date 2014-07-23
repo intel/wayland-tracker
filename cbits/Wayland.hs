@@ -8,8 +8,9 @@ import Foreign
 import Foreign.C.Types
 import qualified Data.ByteString as BS
 import qualified Network.Socket as Socket
--- import qualified Data.ByteString.Unsafe as UBS
-import qualified Data.ByteString.Char8 as BSC
+---- import qualified Data.ByteString.Unsafe as UBS
+-- import qualified Data.ByteString.Char8 as BSC
+import qualified Control.Concurrent as CC
 
 foreign import ccall unsafe "wayland-msg-handling.h sendmsg_wayland"
     c_sendmsg_wayland  :: CInt -- fd
@@ -29,7 +30,9 @@ foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
         -> IO (Int) -- bytes received
 
 sendToWayland :: Socket.Socket -> BS.ByteString -> [Int] -> IO Int
-sendToWayland s bs fds = BS.useAsCStringLen bs sendData
+sendToWayland s bs fds = do
+    CC.threadWaitWrite $ fromIntegral socket
+    BS.useAsCStringLen bs sendData
     where
         socket = Socket.fdSocket s
         c_fds = map fromIntegral fds
@@ -40,9 +43,9 @@ sendToWayland s bs fds = BS.useAsCStringLen bs sendData
             -- TODO: handle exceptions
             return sent
 
-
 recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
 recvFromWayland s = allocaArray 4096 $ \cbuf -> do
+    CC.threadWaitRead $ fromIntegral socket
     alloca $ \nFds_ptr ->
         allocaArray 28 $ \fdArray -> do
             len <- c_recvmsg_wayland socket cbuf 4096 fdArray 28 nFds_ptr
@@ -53,16 +56,3 @@ recvFromWayland s = allocaArray 4096 $ \cbuf -> do
             return (bs, (map fromIntegral fds))
     where
         socket = Socket.fdSocket s
-
-main = do
-    (sock1, sock2) <- Socket.socketPair Socket.AF_UNIX Socket.Stream Socket.defaultProtocol
-
-    let sendBs = BSC.pack "foobar"
-
-    sent <- sendToWayland sock1 sendBs []
-
-    putStrLn $ "Sent bytes: " ++ show sent
-
-    (recvBs, fds) <- recvFromWayland sock2
-
-    putStrLn $ "Received: " ++ BSC.unpack recvBs
