@@ -38,6 +38,16 @@ import Wayland
 
 data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 } deriving (Eq, Show)
 
+data MArgumentValue a = MInt Int
+                      | MUint Int
+                      | MString String
+                      | MFixed Int Int
+                      | MArray BS.ByteString
+                      | MFd
+                      | MNewId Int
+                      | MObject Int
+                            deriving (Show, Eq)
+
 data WMessageBlock = WMessageBlock {
     start :: Int,
     dataLength :: Int,

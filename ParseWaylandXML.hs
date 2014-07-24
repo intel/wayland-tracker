@@ -14,7 +14,7 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as DM
 import qualified Data.Maybe as Maybe
 
-data WArgumentType = WInt | WUint | WFixed | WString | WObject | WNewId | WArray | WFd deriving (Eq, Show)
+data WArgumentType = WInt | WUInt | WFixed | WString | WObject | WNewId | WArray | WFd deriving (Eq, Show)
 
 data WArgumentDescription = WArgumentDescription {
     argDescrName :: String,
@@ -36,7 +36,7 @@ data WInterfaceDescription = WInterfaceDescription {
 type WMessageMap = IM.IntMap WMessageDescription
 
 argumentMap :: DM.Map String WArgumentType
-argumentMap = DM.fromList [ ("int", WInt), ("uint", WUint),
+argumentMap = DM.fromList [ ("int", WInt), ("uint", WUInt),
                             ("fixed", WFixed), ("string", WString),
                             ("object", WObject), ("new_id", WNewId),
                             ("array", WArray), ("fd", WFd) ]
