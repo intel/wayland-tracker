@@ -6,6 +6,7 @@ module Tracker where
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
 -- import qualified Data.ByteString.Lazy as BSL
+import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
 import qualified System.Exit as Exit
@@ -72,6 +73,17 @@ data ParsedMessage = UnknownMessage
                          msgInterface :: String,
                          msgArguments :: [MArgument]
                      } deriving (Eq, Show)
+
+
+data LogType = Simple | Binary | Json
+
+
+getLogType :: String -> Maybe LogType
+getLogType s = case s of
+    "simple" -> Just Simple
+    "binary" -> Just Binary
+    "json" -> Just Json
+    _ -> Nothing
 
 
 dumpByteString :: BS.ByteString -> IO ()
@@ -259,8 +271,9 @@ parseData t om im bs msgs =
 
 
 processingThread :: ObjectMap -> InterfaceMap ->
-                    STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
-processingThread om im chan = processData chan om
+                    STM.TChan (MessageType, BS.ByteString, [Int]) ->
+                    IO.Handle -> LogType -> IO ()
+processingThread om im chan lh lt = processData chan om
     where
         processData input objectMap = do
             (t, bs, _) <- STM.atomically $ STM.readTChan input
@@ -268,6 +281,8 @@ processingThread om im chan = processData chan om
             -- Logging file descriptors doesn't make much sense, because the
             -- fd numbers will anyway change when they are passed over the
             -- socket.
+
+            -- TODO: just do binary parsing if lf = Binary
 
             let r = parseData t objectMap im bs []
 
@@ -356,6 +371,8 @@ execProcess path args sock = do
     env <- E.getEnvironment
     let filteredEnv = filter (\x -> fst x /= "WAYLAND_SOCKET") env
 
+    -- TODO: channel client stdout, stderr to this process' stderr
+
     putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
     Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", fd):filteredEnv)
     -- Process.executeFile path True args (Just filteredEnv)
@@ -399,6 +416,16 @@ readXmlData (xf:xfs) mapping = do
 runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
 runApplication xfs lt lf cmd cmdargs = do
 
+    let logFormat = getLogType lt
+
+    ET.when (Maybe.isNothing logFormat) $ do
+        putStrLn $ "unknown log format type " ++ lt ++ "; known types are simple, binary and json"
+        Exit.exitFailure
+
+    logHandle <- if Maybe.isNothing lf
+        then return IO.stdout
+        else IO.openFile (Maybe.fromJust lf) IO.ReadMode
+
     -- read the protocol file(s)
 
     maybeInterfaceMap <- readXmlData xfs DM.empty
@@ -431,7 +458,7 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ processingThread objectMap interfaceMap loggerChan
+    _ <- CC.forkIO $ processingThread objectMap interfaceMap loggerChan logHandle (Maybe.fromJust logFormat)
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
