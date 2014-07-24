@@ -103,12 +103,12 @@ loggerThread om chan =
             x <- STM.atomically $ STM.readTChan input
             case x of
                 ClientMessage descr msg@(WMessage header blocks bs) -> do
-                        dumpMessage descr msg
+                        -- dumpMessage descr msg
                         -- putStrLn "request:"
                         -- dumpByteString bs
                         return ()
                 ServerMessage descr msg@(WMessage header blocks bs) -> do
-                        dumpMessage descr msg
+                        -- dumpMessage descr msg
                         -- putStrLn "event:"
                         -- dumpByteString bs
                         return ()
@@ -249,12 +249,9 @@ loggerThread2 om im chan =
                 A.Partial _ -> putStrLn $ "Parsing was a partial match"
                 A.Done i msgs -> writeToLog msgs bs
 
-            -- let (msgs, descriptors) = parseDataToMessages bs
             return ()
 
-        parseDataToMessages bs = undefined
-
-
+{-
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
 parseHeader = BG.runGet process
     where
@@ -419,6 +416,8 @@ readFullMessage s h d bs remaining = do
     else
         return $ WMessage h (reverse blocks) bytes
 
+-}
+
 loop :: InterfaceMap -> CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
 loop im om t inputSock outputSock logger =  do
 
@@ -460,7 +459,7 @@ loop im om t inputSock outputSock logger =  do
 
     -- if the socket is no longer connected, end the thread
     -- M.unless (BS.null header) $ processMsg header
-
+{-
     where
         readData :: Socket.Socket -> ET.ErrorT String IO (WMessageDescription, WMessage)
         readData sock = do
@@ -636,7 +635,7 @@ parseMessageWord bs start =
         wordStart = 8 + start
         wordBs = ((BS.take 4) . (BS.drop wordStart)) bs
         mWord = parseWord wordBs
-
+-}
 
 {-
 Some objects are so called "typeless objects". The scanner generates extra code
