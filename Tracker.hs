@@ -242,6 +242,8 @@ loggerThread2 om im chan =
 
             let res = A.parse (dataParser om im t) bs
 
+            -- remember to update om, TODO: can't be done from here
+
             case res of
                 A.Fail rest _ err -> putStrLn $ "Failed to parse: " ++ err
                 A.Partial _ -> putStrLn $ "Parsing was a partial match"
