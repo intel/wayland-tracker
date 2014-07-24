@@ -244,44 +244,40 @@ updateMap im msg om =
 
 
 parseData :: MessageType -> ObjectMap -> InterfaceMap -> BS.ByteString ->
-             [ParsedMessage] -> IO (Maybe ([ParsedMessage], ObjectMap))
-parseData t om im bs msgs = do
-    let res = A.parse (messageParser om im t) bs
-    case res of
-        A.Fail rest ctx err -> do
-            putStrLn $ "Failed to parse: " ++ err
-            print ctx
-            print rest
-            return Nothing
-        A.Partial _ -> do
-            putStrLn $ "Parsing was a partial match"
-            return Nothing
-        A.Done i msg -> do
-            print msg
+             [ParsedMessage] -> Either String ([ParsedMessage], ObjectMap)
+parseData t om im bs msgs =
+    case A.parse (messageParser om im t) bs of
+        A.Fail _ _ err -> Left ("Parsing failure: " ++ err)
+        A.Partial _ -> Left "Parsing was a partial match"
+        A.Done i msg ->
             -- update object map
             let newOm = updateMap im msg om
-            if BS.null i
-                then return $ Just (msgs, newOm)
-                else parseData t newOm im i (msg:msgs)
+            in
+                if BS.null i
+                    then Right ((msg:msgs), newOm)
+                    else parseData t newOm im i (msg:msgs)
 
 
-processingThread :: ObjectMap -> InterfaceMap -> STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+processingThread :: ObjectMap -> InterfaceMap ->
+                    STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 processingThread om im chan = processData chan om
     where
         processData input objectMap = do
-            (t, bs, fds) <- STM.atomically $ STM.readTChan input
+            (t, bs, _) <- STM.atomically $ STM.readTChan input
 
             -- Logging file descriptors doesn't make much sense, because the
             -- fd numbers will anyway change when they are passed over the
             -- socket.
 
-            r <- parseData t objectMap im bs []
+            let r = parseData t objectMap im bs []
 
             case r of
-                Just (msgs, newObjectMap) -> do
+                Right (msgs, newObjectMap) -> do
                     -- writeToLog msgs bs
+                    putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
                     processData chan newObjectMap
-                Nothing -> do
+                Left str -> do
+                    putStrLn str
                     processData chan objectMap
 
 
