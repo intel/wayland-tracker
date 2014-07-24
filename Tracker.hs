@@ -32,9 +32,13 @@ import qualified Data.List as List
 import qualified Data.Attoparsec.ByteString as A
 -- import qualified Data.Attoparsec.Combinator as AC
 import qualified Data.Attoparsec.Binary as AB
+-- import qualified Data.Time as Time
+import qualified Data.Time.Clock.POSIX as Clock
 
--- import Control.Applicative
+import Control.Applicative
 
+import Types
+import Log
 import ParseWaylandXML
 import Wayland
 
@@ -49,34 +53,6 @@ type InterfaceMap = DM.Map String WInterfaceDescription
 -- mapping of bound object ids to interfaces
 type ObjectMap = IM.IntMap WInterfaceDescription
 
-data MessageType = Request | Event deriving (Eq, Show)
-
-data MArgumentValue = MInt Int
-                    | MUInt Int
-                    | MString String
-                    | MFixed Bool Int Int
-                    | MArray BS.ByteString
-                    | MFd
-                    | MNewId Int String
-                    | MObject Int
-                           deriving (Eq, Show)
-
-data MArgument = MArgument {
-                     argName :: String,
-                     argValue :: MArgumentValue
-                 } deriving (Eq, Show)
-
-data ParsedMessage = UnknownMessage
-                   | Message {
-                         msgType :: MessageType,
-                         msgName :: String,
-                         msgInterface :: String,
-                         msgArguments :: [MArgument]
-                     } deriving (Eq, Show)
-
-
-data LogType = Simple | Binary | Json
-
 
 getLogType :: String -> Maybe LogType
 getLogType s = case s of
@@ -85,6 +61,11 @@ getLogType s = case s of
     "json" -> Just Json
     _ -> Nothing
 
+
+generateTS :: IO String
+generateTS = do
+    time <- Clock.getPOSIXTime
+    return $ "[" ++ (show time) ++ "]"
 
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
@@ -207,6 +188,21 @@ messageParser om _ t = do
             Event -> interfaceEvents interface
 
 
+binaryMessageParser:: MessageType -> A.Parser ParsedBinaryMessage
+binaryMessageParser t = do
+    senderIdW <- AB.anyWord32le
+    opCodeW <- AB.anyWord16le
+    msgSizeW <- AB.anyWord16le
+
+    let senderId = fromIntegral senderIdW
+    let size = fromIntegral msgSizeW
+    let opCode = fromIntegral opCodeW
+
+
+    msgData <- A.take (size - 8)
+
+    return $ ParsedBinaryMessage t senderId size opCode msgData
+
 isNewId :: MArgument -> Bool
 isNewId (MArgument _ (MNewId _ _)) = True
 isNewId _ = False
@@ -220,7 +216,7 @@ updateMap im msg om =
                 "bind" -> case processBind om msg of
                     Just newOm -> newOm
                     Nothing -> om
-                "delöete_id" -> case processDeleteId om msg of
+                "delete_id" -> case processDeleteId om msg of
                     Just newOm -> newOm
                     Nothing -> om
                 _ -> case processCreateObject om msg of
@@ -255,12 +251,24 @@ updateMap im msg om =
                 _ -> Nothing
 
 
+parseBinaryData :: MessageType -> BS.ByteString -> [ParsedBinaryMessage] ->
+                   Either String [ParsedBinaryMessage]
+parseBinaryData t bs msgs =
+    case A.parse (binaryMessageParser t) bs of
+        A.Fail _ _ err -> Left ("Parsing failure: " ++ err)
+        A.Partial _ -> Left "Confused with protocol files and actual data"
+        A.Done i msg ->
+            if BS.null i
+                then Right (msg:msgs)
+                else parseBinaryData t i (msg:msgs)
+
+
 parseData :: MessageType -> ObjectMap -> InterfaceMap -> BS.ByteString ->
              [ParsedMessage] -> Either String ([ParsedMessage], ObjectMap)
 parseData t om im bs msgs =
     case A.parse (messageParser om im t) bs of
         A.Fail _ _ err -> Left ("Parsing failure: " ++ err)
-        A.Partial _ -> Left "Parsing was a partial match"
+        A.Partial _ -> Left "Confused with protocol files and actual data"
         A.Done i msg ->
             -- update object map
             let newOm = updateMap im msg om
@@ -275,8 +283,13 @@ processingThread :: ObjectMap -> InterfaceMap ->
                     IO.Handle -> LogType -> IO ()
 processingThread om im chan lh lt = processData chan om
     where
+        logger = Logger lh lt
         processData input objectMap = do
             (t, bs, _) <- STM.atomically $ STM.readTChan input
+
+            -- Everything read in one go will have the same timestamp
+
+            ts <- generateTS
 
             -- Logging file descriptors doesn't make much sense, because the
             -- fd numbers will anyway change when they are passed over the
@@ -284,16 +297,28 @@ processingThread om im chan lh lt = processData chan om
 
             -- TODO: just do binary parsing if lf = Binary
 
-            let r = parseData t objectMap im bs []
-
-            case r of
-                Right (msgs, newObjectMap) -> do
-                    -- writeToLog msgs bs
-                    putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
-                    processData chan newObjectMap
-                Left str -> do
-                    putStrLn str
-                    processData chan objectMap
+            case lt of
+                Binary -> do
+                    let r = parseBinaryData t bs []
+                    case r of
+                        Right msgs -> do
+                            mapM_ (writeBinaryLog logger ts) msgs
+                            processData chan om
+                        Left str -> do
+                            putStrLn str
+                            processData chan om
+                _ ->
+                    let r = parseData t objectMap im bs []
+                    in
+                        case r of
+                            Right (msgs, newObjectMap) -> do
+                                -- writeToLog msgs bs
+                                putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
+                                mapM_ (writeLog logger ts) msgs
+                                processData chan newObjectMap
+                            Left str -> do
+                                putStrLn str
+                                processData chan objectMap
 
 
 loop :: MessageType -> Socket.Socket -> Socket.Socket ->

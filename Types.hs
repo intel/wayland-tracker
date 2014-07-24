@@ -5,7 +5,9 @@ module Types (
     MArgumentValue(..),
     MArgument(..),
     ParsedMessage(..),
-    LogType(..))
+    ParsedBinaryMessage(..),
+    LogType(..),
+    Logger(..))
 
 where
 
@@ -30,6 +32,8 @@ data MArgument = MArgument {
                      argValue :: MArgumentValue
                  } deriving (Eq, Show, Generic)
 
+-- TODO: these should belong to the same class with message type
+
 data ParsedMessage = UnknownMessage
                    | Message {
                          msgType :: MessageType,
@@ -38,6 +42,13 @@ data ParsedMessage = UnknownMessage
                          msgArguments :: [MArgument]
                      } deriving (Eq, Show,  Generic)
 
+data ParsedBinaryMessage = ParsedBinaryMessage {
+                                binaryMsgType :: MessageType,
+                                senderId :: Int,
+                                opCode :: Int,
+                                msgSize :: Int,
+                                msgData :: BS.ByteString
+                           }
 
 data LogType = Simple | Binary | Json
 
