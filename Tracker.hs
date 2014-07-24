@@ -28,6 +28,11 @@ import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
 import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
+import qualified Data.Attoparsec.ByteString as A
+import qualified Data.Attoparsec.Combinator as AC
+import qualified Data.Attoparsec.Binary as AB
+
+import Control.Applicative
 
 import ParseWaylandXML
 import Wayland
@@ -38,15 +43,17 @@ import Wayland
 
 data WHeader = WHeader { object :: W.Word32, size :: W.Word16, opcode :: W.Word16 } deriving (Eq, Show)
 
-data MArgumentValue a = MInt Int
-                      | MUint Int
-                      | MString String
-                      | MFixed Int Int
-                      | MArray BS.ByteString
-                      | MFd
-                      | MNewId Int
-                      | MObject Int
-                            deriving (Show, Eq)
+data MArgumentValue = MInt Int
+                    | MUInt Int
+                    | MString String
+                    | MFixed Bool Int Int
+                    | MArray BS.ByteString
+                    | MFd
+                    | MNewId Int
+                    | MObject Int
+                           deriving (Eq, Show)
+
+data MArgument = MArgument String MArgumentValue deriving (Eq, Show)
 
 data WMessageBlock = WMessageBlock {
     start :: Int,
@@ -69,6 +76,15 @@ type InterfaceMap = DM.Map String WInterfaceDescription
 
 -- mapping of bound object ids to interfaces
 type ObjectMap = IM.IntMap WInterfaceDescription
+
+data ParsedMessage = UnknownMessage
+                   | Message {
+                         msgType :: MessageType,
+                         msgName :: String,
+                         msgInterface :: String,
+                         msgArguments :: [MArgument]
+                     } deriving (Eq, Show)
+
 
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
@@ -97,8 +113,122 @@ loggerThread om chan =
                         -- dumpByteString bs
                         return ()
 
+
+intParser :: A.Parser MArgumentValue
+intParser = do
+    v <- AB.anyWord32le
+    return $ MInt $ fromIntegral v
+
+uintParser :: A.Parser MArgumentValue
+uintParser = do
+    v <- AB.anyWord32le
+    return $ MUInt $ fromIntegral v
+
+objectParser :: A.Parser MArgumentValue
+objectParser = do
+    v <- AB.anyWord32le
+    return $ MObject $ fromIntegral v
+
+newIdParser :: A.Parser MArgumentValue
+newIdParser = do
+    v <- AB.anyWord32le
+    return $ MNewId $ fromIntegral v
+
+fixedParser :: A.Parser MArgumentValue
+fixedParser = do
+    v <- AB.anyWord32le
+    return $ MFixed True 0 $ fromIntegral v -- TODO
+
+stringParser :: A.Parser MArgumentValue
+stringParser = do
+    lenW <- AB.anyWord32le
+    let dataLen = fromIntegral lenW
+    let paddedLen = if (rem dataLen 4) == 0
+        then dataLen
+        else dataLen + (4 - (rem dataLen 4))
+    str <- A.take dataLen
+    A.take $ paddedLen - dataLen
+    return $ MString $ U.toString str
+
+arrayParser :: A.Parser MArgumentValue
+arrayParser = do
+    lenW <- AB.anyWord32le
+    let dataLen = fromIntegral lenW
+    let paddedLen = if (rem dataLen 4) == 0
+        then dataLen
+        else dataLen + (4 - (rem dataLen 4))
+    let diff = paddedLen - dataLen
+    arr <- A.take dataLen
+    A.take $ paddedLen - dataLen
+    return $ MArray $ arr
+
+fdParser :: A.Parser MArgumentValue
+fdParser = return MFd
+
+messageDataParser :: WMessageDescription -> A.Parser [MArgument]
+messageDataParser (WMessageDescription msgName msgArgs) = do
+    let ps = reverse $ messageBlockParser msgArgs []
+    values <- M.sequence ps
+    let combined = zipWith (\a v -> MArgument (argDescrName a) v) msgArgs values
+    return combined
+    where
+        messageBlockParser :: [WArgumentDescription] -> [A.Parser MArgumentValue] -> [A.Parser MArgumentValue]
+        messageBlockParser [] parsers = parsers
+        messageBlockParser (a:args) parsers = messageBlockParser args ((selectParser a):parsers)
+            where
+                selectParser :: WArgumentDescription -> A.Parser MArgumentValue
+                selectParser a = case argDescrType a of
+                    WInt -> intParser
+                    WUInt -> uintParser
+                    WFd -> fdParser
+                    WObject -> objectParser
+                    WNewId -> newIdParser
+                    WString -> stringParser
+                    WArray -> arrayParser
+                    WFixed -> fixedParser
+
+messageParser :: ObjectMap -> InterfaceMap -> MessageType -> A.Parser ParsedMessage
+messageParser om im t = do
+    senderIdW <- AB.anyWord32le
+    msgSizeW <- AB.anyWord16le
+    opCodeW <- AB.anyWord16le
+
+    let senderId = fromIntegral senderId
+    let msgSize = fromIntegral msgSize
+    let opCode = fromIntegral opCodeW
+
+    -- let mInterface = IM.lookup om senderId
+
+    case IM.lookup senderId om of
+        Just interfaceDescription -> case IM.lookup opCode (getMap t interfaceDescription) of
+            Just messageDescription -> do
+                let msgName = msgDescrName messageDescription
+                let interfaceName = interfaceDescrName interfaceDescription
+                args <- messageDataParser messageDescription
+                return $ Message t msgName interfaceName args
+            Nothing -> do
+                A.take (msgSize - 8)
+                return UnknownMessage
+        Nothing -> do
+            A.take (msgSize - 8)
+            return UnknownMessage
+
+    where
+        getMap :: MessageType -> WInterfaceDescription -> WMessageMap
+        getMap messageType interface = case messageType of
+            Request -> interfaceRequests interface
+            Event -> interfaceEvents interface
+
+
+dataParser :: ObjectMap -> InterfaceMap -> MessageType -> A.Parser [ParsedMessage]
+dataParser om im t = many $ messageParser om im t
+
+writeToLog msgs bs = undefined
+
 loggerThread2 :: ObjectMap -> InterfaceMap -> STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 loggerThread2 om im chan =
+
+    -- TODO: create mapping (interface, opcode) -> parser
 
     M.forever $ processData chan
 
@@ -110,7 +240,14 @@ loggerThread2 om im chan =
             -- fd numbers will anyway change when they are passed over the
             -- socket.
 
-            let (msgs, descriptors) = parseDataToMessages bs
+            let res = A.parse (dataParser om im t) bs
+
+            case res of
+                A.Fail rest _ err -> putStrLn $ "Failed to parse: " ++ err
+                A.Partial _ -> putStrLn $ "Parsing was a partial match"
+                A.Done i msgs -> writeToLog msgs bs
+
+            -- let (msgs, descriptors) = parseDataToMessages bs
             return ()
 
         parseDataToMessages bs = undefined
@@ -154,7 +291,7 @@ dumpMessage (WMessageDescription name args) (WMessage header blocks bs) = do
                     putStrLn "           type: Int"
                     let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
                     putStrLn $ "           value: " ++ value
-                WUint -> do
+                WUInt -> do
                     putStrLn "           type: UInt"
                     let value = show $ fromIntegral $ Maybe.fromJust $ parseMessageWord bs start
                     putStrLn $ "           value: " ++ value
@@ -225,9 +362,9 @@ readBlocks s (a:as) blocks bs start remaining = do
             input <- readPrimitive s 4
             let b = WMessageBlock start 4 WInt 0
             readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
-        WUint -> do
+        WUInt -> do
             input <- readPrimitive s 4
-            let b = WMessageBlock start 4 WUint 0
+            let b = WMessageBlock start 4 WUInt 0
             readBlocks s as (b:blocks) (BS.append bs input) (start + 4) (remaining - 4)
         WFixed -> do
             input <- readPrimitive s 4
@@ -519,7 +656,7 @@ fixMessage msg@(WMessageDescription n args) =
             let beginning = takeWhile (\a -> argDescrType a /= WNewId) args
                 end = dropWhile (\a -> argDescrType a /= WNewId) args
                 newArgs = [ WArgumentDescription "interface" WString "",
-                            WArgumentDescription "version" WUint "" ]
+                            WArgumentDescription "version" WUInt "" ]
             in
                 WMessageDescription n (beginning ++ newArgs ++ end)
         else
