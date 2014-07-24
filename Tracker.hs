@@ -2,7 +2,7 @@ module Tracker where
 
 import qualified Data.Word as W
 -- import qualified Foreign.C.Types as C
-import qualified Data.Binary.Strict.Get as BG
+-- import qualified Data.Binary.Strict.Get as BG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
 -- import qualified Data.ByteString.Lazy as BSL
@@ -16,11 +16,11 @@ import qualified System.Posix.Process as Process
 import qualified System.Posix.Signals as Signals
 import qualified System.Posix.Types as PT
 import qualified Network.Socket as Socket
-import qualified Network.Socket.ByteString as BSocket
+-- import qualified Network.Socket.ByteString as BSocket
 -- import qualified System.IO as SIO
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
-import qualified Control.Concurrent.STM.TChan as T
+-- import qualified Control.Concurrent.STM.TChan as T
 import qualified Control.Monad.Error as ET
 import qualified Numeric as N
 import qualified Data.Maybe as Maybe
@@ -29,10 +29,10 @@ import qualified Data.IntMap as IM
 import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
 import qualified Data.Attoparsec.ByteString as A
-import qualified Data.Attoparsec.Combinator as AC
+-- import qualified Data.Attoparsec.Combinator as AC
 import qualified Data.Attoparsec.Binary as AB
 
-import Control.Applicative
+-- import Control.Applicative
 
 import ParseWaylandXML
 import Wayland
@@ -49,24 +49,28 @@ data MArgumentValue = MInt Int
                     | MFixed Bool Int Int
                     | MArray BS.ByteString
                     | MFd
-                    | MNewId Int
+                    | MNewId Int String
                     | MObject Int
                            deriving (Eq, Show)
 
-data MArgument = MArgument String MArgumentValue deriving (Eq, Show)
-
+data MArgument = MArgument {
+                     argName :: String,
+                     argValue :: MArgumentValue
+                 } deriving (Eq, Show)
+{-
 data WMessageBlock = WMessageBlock {
     start :: Int,
     dataLength :: Int,
     blockType :: WArgumentType,
     dataFd :: Int
 } deriving (Eq, Show)
+-}
 
 data MessageType = Request | Event deriving (Eq, Show)
 
-data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString deriving (Eq, Show)
+-- data WMessage = WMessage WHeader [WMessageBlock] BS.ByteString deriving (Eq, Show)
 
-data Message = ClientMessage WMessageDescription WMessage | ServerMessage WMessageDescription WMessage deriving (Eq, Show)
+-- data Message = ClientMessage WMessageDescription WMessage | ServerMessage WMessageDescription WMessage deriving (Eq, Show)
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
@@ -93,6 +97,7 @@ dumpByteString bs = do
     where
         bytes = BS.unpack bs
 
+{-
 loggerThread :: CC.MVar ObjectMap -> STM.TChan Message -> IO ()
 loggerThread om chan =
 
@@ -112,7 +117,7 @@ loggerThread om chan =
                         -- putStrLn "event:"
                         -- dumpByteString bs
                         return ()
-
+-}
 
 intParser :: A.Parser MArgumentValue
 intParser = do
@@ -129,10 +134,10 @@ objectParser = do
     v <- AB.anyWord32le
     return $ MObject $ fromIntegral v
 
-newIdParser :: A.Parser MArgumentValue
-newIdParser = do
+newIdParser :: String -> A.Parser MArgumentValue
+newIdParser interface = do
     v <- AB.anyWord32le
-    return $ MNewId $ fromIntegral v
+    return $ MNewId (fromIntegral v) interface
 
 fixedParser :: A.Parser MArgumentValue
 fixedParser = do
@@ -146,7 +151,8 @@ stringParser = do
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
         else dataLen + (4 - (rem dataLen 4))
-    str <- A.take dataLen
+    str <- A.take (dataLen - 1)
+    A.take 1 -- the terminating NUL byte
     A.take $ paddedLen - dataLen
     return $ MString $ U.toString str
 
@@ -157,7 +163,6 @@ arrayParser = do
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
         else dataLen + (4 - (rem dataLen 4))
-    let diff = paddedLen - dataLen
     arr <- A.take dataLen
     A.take $ paddedLen - dataLen
     return $ MArray $ arr
@@ -166,7 +171,7 @@ fdParser :: A.Parser MArgumentValue
 fdParser = return MFd
 
 messageDataParser :: WMessageDescription -> A.Parser [MArgument]
-messageDataParser (WMessageDescription msgName msgArgs) = do
+messageDataParser (WMessageDescription _ msgArgs) = do
     let ps = reverse $ messageBlockParser msgArgs []
     values <- M.sequence ps
     let combined = zipWith (\a v -> MArgument (argDescrName a) v) msgArgs values
@@ -174,7 +179,7 @@ messageDataParser (WMessageDescription msgName msgArgs) = do
     where
         messageBlockParser :: [WArgumentDescription] -> [A.Parser MArgumentValue] -> [A.Parser MArgumentValue]
         messageBlockParser [] parsers = parsers
-        messageBlockParser (a:args) parsers = messageBlockParser args ((selectParser a):parsers)
+        messageBlockParser (arg:args) parsers = messageBlockParser args ((selectParser arg):parsers)
             where
                 selectParser :: WArgumentDescription -> A.Parser MArgumentValue
                 selectParser a = case argDescrType a of
@@ -182,30 +187,28 @@ messageDataParser (WMessageDescription msgName msgArgs) = do
                     WUInt -> uintParser
                     WFd -> fdParser
                     WObject -> objectParser
-                    WNewId -> newIdParser
+                    WNewId -> (newIdParser $ argDescrInterface a)
                     WString -> stringParser
                     WArray -> arrayParser
                     WFixed -> fixedParser
 
 messageParser :: ObjectMap -> InterfaceMap -> MessageType -> A.Parser ParsedMessage
-messageParser om im t = do
+messageParser om _ t = do
     senderIdW <- AB.anyWord32le
-    msgSizeW <- AB.anyWord16le
     opCodeW <- AB.anyWord16le
+    msgSizeW <- AB.anyWord16le
 
-    let senderId = fromIntegral senderId
-    let msgSize = fromIntegral msgSize
+    let senderId = fromIntegral senderIdW
+    let msgSize = fromIntegral msgSizeW
     let opCode = fromIntegral opCodeW
-
-    -- let mInterface = IM.lookup om senderId
 
     case IM.lookup senderId om of
         Just interfaceDescription -> case IM.lookup opCode (getMap t interfaceDescription) of
             Just messageDescription -> do
-                let msgName = msgDescrName messageDescription
+                let messageName = msgDescrName messageDescription
                 let interfaceName = interfaceDescrName interfaceDescription
                 args <- messageDataParser messageDescription
-                return $ Message t msgName interfaceName args
+                return $ Message t messageName interfaceName args
             Nothing -> do
                 A.take (msgSize - 8)
                 return UnknownMessage
@@ -220,36 +223,130 @@ messageParser om im t = do
             Event -> interfaceEvents interface
 
 
-dataParser :: ObjectMap -> InterfaceMap -> MessageType -> A.Parser [ParsedMessage]
-dataParser om im t = many $ messageParser om im t
+isNewId :: MArgument -> Bool
+isNewId (MArgument _ (MNewId _ _)) = True
+isNewId _ = False
+
+updateMap :: InterfaceMap -> ParsedMessage -> ObjectMap -> ObjectMap
+updateMap im msg om =
+    case msg of
+        Message _ name _ _ ->
+            case name of
+                "bind" -> case processBind om msg of
+                    Just newOm -> newOm
+                    Nothing -> om
+                "delöete_id" -> case processDeleteId om msg of
+                    Just newOm -> newOm
+                    Nothing -> om
+                _ -> case processCreateObject om msg of
+                    Just newOm -> newOm
+                    Nothing -> om
+        UnknownMessage -> om
+    where
+        processBind oldOm (Message _ _ _ args) = do
+            iface <- List.find (\a -> argName a == "interface") args
+            newId <- List.find (\a -> argName a == "id") args
+            case argValue iface of
+                MString sv -> do
+                    interfaceDescr <- DM.lookup sv im
+                    case argValue newId of
+                        MNewId niv _ -> Just $ IM.insert niv interfaceDescr oldOm
+                        _ -> Nothing
+                _ -> Nothing
+
+        processCreateObject oldOm (Message _ _ _ args) = do
+            newId <- List.find isNewId args
+            case argValue newId of
+                MNewId niv interface -> do
+                    interfaceDescr <- DM.lookup interface im
+                    Just $ IM.insert niv interfaceDescr oldOm
+                _ -> Nothing
+
+        processDeleteId oldOm (Message _ _ _ args) = do
+            deletedId <- List.find (\a -> argName a == "id") args
+            case argValue deletedId of
+                MUInt v -> do
+                    Just $ IM.delete v oldOm
+                _ -> Nothing
+
+
+parseData :: MessageType -> ObjectMap -> InterfaceMap -> BS.ByteString ->
+             [ParsedMessage] -> IO (Maybe ([ParsedMessage], ObjectMap))
+parseData t om im bs msgs = do
+    let res = A.parse (messageParser om im t) bs
+    case res of
+        A.Fail rest ctx err -> do
+            putStrLn $ "Failed to parse: " ++ err
+            print ctx
+            print rest
+            return Nothing
+        A.Partial _ -> do
+            putStrLn $ "Parsing was a partial match"
+            return Nothing
+        A.Done i msg -> do
+            print msg
+            -- update object map
+            let newOm = updateMap im msg om
+            if BS.null i
+                then return $ Just (msgs, newOm)
+                else parseData t newOm im i (msg:msgs)
+
 
 writeToLog msgs bs = undefined
 
-loggerThread2 :: ObjectMap -> InterfaceMap -> STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
-loggerThread2 om im chan =
+
+{-}
+processBind im msg@(WMessageDescription name args) blocks bs =
+    let mIface = List.find (\a -> argName a == "interface") args
+        mNewId = List.find (\a -> argName a == "id") args
+    in
+        do
+            case getData mIfaceIndex mNewIdIndex of
+                Nothing -> do
+                    putStrLn "Error processing bind"
+                Just (newId, interface) ->
+                    case DM.lookup interface im of
+                        Just i -> do
+                            insertMapping om (fromIntegral newId) i
+                            putStrLn $ "new bind mapping: " ++ show (fromIntegral newId) ++ " -> " ++ interface
+                        Nothing -> do
+                            putStrLn $ "Interface not found in the map: " ++ interface
+    where
+        getData :: Maybe Int -> Maybe Int -> Maybe (W.Word32, String)
+        getData mInterfaceIndex mNewIdIndex = do
+            interfaceIndex <- mInterfaceIndex
+            newIdIndex <- mNewIdIndex
+            let interfaceBlock = blocks !! interfaceIndex
+            let newIdBlock = blocks !! newIdIndex
+            interface <- parseMessageString bs $ start interfaceBlock
+            newId <- parseMessageWord bs $ start newIdBlock
+            return (newId, interface)
+-}
+
+loggerThread :: ObjectMap -> InterfaceMap -> STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+loggerThread om im chan =
 
     -- TODO: create mapping (interface, opcode) -> parser
 
-    M.forever $ processData chan
+    processData chan om
 
     where
-        processData input = do
+        processData input objectMap = do
             (t, bs, fds) <- STM.atomically $ STM.readTChan input
 
             -- Logging file descriptors doesn't make much sense, because the
             -- fd numbers will anyway change when they are passed over the
             -- socket.
 
-            let res = A.parse (dataParser om im t) bs
+            r <- parseData t objectMap im bs []
 
-            -- remember to update om, TODO: can't be done from here
+            case r of
+                Just (msgs, newObjectMap) -> do
+                    -- writeToLog msgs bs
+                    processData chan newObjectMap
+                Nothing -> do
+                    processData chan objectMap
 
-            case res of
-                A.Fail rest _ err -> putStrLn $ "Failed to parse: " ++ err
-                A.Partial _ -> putStrLn $ "Parsing was a partial match"
-                A.Done i msgs -> writeToLog msgs bs
-
-            return ()
 
 {-
 parseHeader :: BS.ByteString -> (Either String (W.Word32, W.Word16, W.Word16), BS.ByteString)
@@ -418,8 +515,9 @@ readFullMessage s h d bs remaining = do
 
 -}
 
-loop :: InterfaceMap -> CC.MVar ObjectMap -> MessageType -> Socket.Socket -> Socket.Socket -> T.TChan Message -> IO ()
-loop im om t inputSock outputSock logger =  do
+loop :: MessageType -> Socket.Socket -> Socket.Socket ->
+        STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+loop t inputSock outputSock logger =  do
 
     let direction = if t == Request
         then "client"
@@ -433,7 +531,9 @@ loop im om t inputSock outputSock logger =  do
 
     ET.when (sent == 0) $ ET.throwError $ ET.strMsg $ "output socket for " ++ direction ++ " was closed"
 
-    loop im om t inputSock outputSock logger
+    STM.atomically $ STM.writeTChan logger (t, bs, fds)
+
+    loop t inputSock outputSock logger
 
 
 {-
@@ -666,15 +766,19 @@ fixMessage msg@(WMessageDescription n args) =
 fixInterface (WInterfaceDescription n rs es) =
     WInterfaceDescription n (IM.map fixMessage rs) (IM.map fixMessage es)
 
-clientThread :: STM.TMVar Event -> InterfaceMap -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-clientThread eventV im om clientSock serverSock loggerChan = do
-    loop im om Request clientSock serverSock loggerChan
+clientThread :: STM.TMVar Event ->
+                Socket.Socket -> Socket.Socket ->
+                STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+clientThread eventV clientSock serverSock loggerChan = do
+    loop Request clientSock serverSock loggerChan
     STM.atomically $ STM.putTMVar eventV ClientClosedSocket
 
 
-serverThread :: STM.TMVar Event -> InterfaceMap -> CC.MVar ObjectMap -> Socket.Socket -> Socket.Socket -> STM.TChan Message -> IO ()
-serverThread eventV im om serverSock clientSock loggerChan = do
-    loop im om Event serverSock clientSock loggerChan
+serverThread :: STM.TMVar Event ->
+                Socket.Socket -> Socket.Socket ->
+                STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+serverThread eventV serverSock clientSock loggerChan = do
+    loop Event serverSock clientSock loggerChan
     STM.atomically $ STM.putTMVar eventV ServerClosedSocket
 
 
@@ -769,7 +873,7 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- initialize object map with known global mapping 1 -> "wl_display"
 
-    objectMap <- CC.newMVar $ IM.insert 1 display IM.empty
+    let objectMap = IM.insert 1 display IM.empty
 
     -- read the WAYLAND_DISPLAY environment variable
 
@@ -779,7 +883,7 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ loggerThread objectMap loggerChan
+    _ <- CC.forkIO $ loggerThread objectMap interfaceMap loggerChan
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
@@ -804,9 +908,9 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- start threads for communication
 
-    _ <- CC.forkIO $ serverThread eventV interfaceMap objectMap serverSock clientSock loggerChan
+    _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
 
-    _ <- CC.forkIO $ clientThread eventV interfaceMap objectMap clientSock serverSock loggerChan
+    _ <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
 
     -- fork the child
 
