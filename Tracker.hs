@@ -278,16 +278,49 @@ parseData t om im bs msgs =
                     else parseData t newOm im i (msg:msgs)
 
 
-processingThread :: ObjectMap -> InterfaceMap ->
+processingThread :: [String] ->
                     STM.TChan (MessageType, BS.ByteString, [Int]) ->
                     IO.Handle -> LogType -> IO ()
-processingThread om im chan lh lt = processData chan om
+processingThread xfs chan lh lt = do
+
+    -- read the protocol file(s)
+
+    case lt of
+        Binary -> processBinaryData chan
+        _ -> do
+            xmlData <- readXmlData xfs DM.empty
+            case getXmlData xmlData of
+                Nothing -> putStrLn "reading or parsing of XML files failed"
+                Just (im, displayDescr) -> do
+                    -- initialize object map with known global mapping 1 -> "wl_display"
+                    let objectMap = IM.insert 1 displayDescr IM.empty
+                    processData chan objectMap im
+
     where
+        getXmlData xmlData = do
+            interfaceMap <- xmlData
+            displayDescr <- DM.lookup "wl_display" interfaceMap
+            return (interfaceMap, displayDescr)
+
         logger = Logger lh lt
-        processData input objectMap = do
+
+        processBinaryData input = do
             (t, bs, _) <- STM.atomically $ STM.readTChan input
 
             -- Everything read in one go will have the same timestamp
+            ts <- generateTS
+
+            let r = parseBinaryData t bs []
+            case r of
+                Right msgs -> do
+                    mapM_ (writeBinaryLog logger ts) msgs
+                    processBinaryData chan
+                Left str -> do
+                    putStrLn str
+                    processBinaryData chan
+
+        processData input objectMap im = do
+            (t, bs, _) <- STM.atomically $ STM.readTChan input
 
             ts <- generateTS
 
@@ -295,30 +328,16 @@ processingThread om im chan lh lt = processData chan om
             -- fd numbers will anyway change when they are passed over the
             -- socket.
 
-            -- TODO: just do binary parsing if lf = Binary
-
-            case lt of
-                Binary -> do
-                    let r = parseBinaryData t bs []
-                    case r of
-                        Right msgs -> do
-                            mapM_ (writeBinaryLog logger ts) msgs
-                            processData chan om
-                        Left str -> do
-                            putStrLn str
-                            processData chan om
-                _ ->
-                    let r = parseData t objectMap im bs []
-                    in
-                        case r of
-                            Right (msgs, newObjectMap) -> do
-                                -- writeToLog msgs bs
-                                putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
-                                mapM_ (writeLog logger ts) msgs
-                                processData chan newObjectMap
-                            Left str -> do
-                                putStrLn str
-                                processData chan objectMap
+            let r = parseData t objectMap im bs []
+            case r of
+                Right (msgs, newObjectMap) -> do
+                    -- writeToLog msgs bs
+                    putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
+                    mapM_ (writeLog logger ts) msgs
+                    processData chan newObjectMap im
+                Left str -> do
+                    putStrLn str
+                    processData chan objectMap im
 
 
 loop :: MessageType -> Socket.Socket -> Socket.Socket ->
@@ -451,30 +470,6 @@ runApplication xfs lt lf cmd cmdargs = do
         then return IO.stdout
         else IO.openFile (Maybe.fromJust lf) IO.ReadMode
 
-    -- read the protocol file(s)
-
-    maybeInterfaceMap <- readXmlData xfs DM.empty
-
-    ET.when (Maybe.isNothing maybeInterfaceMap) $ do
-        putStrLn "reading or parsing of XML files failed"
-        Exit.exitFailure
-
-    let interfaceMap = Maybe.fromJust maybeInterfaceMap
-
-    -- check that the global object wl_display exists in the map
-
-    let maybeDisplay = DM.lookup "wl_display" interfaceMap
-
-    ET.when (Maybe.isNothing maybeDisplay) $ do
-        putStrLn "required global wl_display not found"
-        Exit.exitFailure
-
-    let display = Maybe.fromJust maybeDisplay
-
-    -- initialize object map with known global mapping 1 -> "wl_display"
-
-    let objectMap = IM.insert 1 display IM.empty
-
     -- read the WAYLAND_DISPLAY environment variable
 
     loggerChan <- STM.newTChanIO
@@ -483,7 +478,7 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ processingThread objectMap interfaceMap loggerChan logHandle (Maybe.fromJust logFormat)
+    _ <- CC.forkIO $ processingThread xfs loggerChan logHandle (Maybe.fromJust logFormat)
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
