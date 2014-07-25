@@ -7,7 +7,7 @@ xmlFiles :: Cmd.Term [String]
 xmlFiles = Cmd.value $ Cmd.optAll [] $ Cmd.optInfo ["xml-file", "x"]
 
 logType :: Cmd.Term String
-logType = Cmd.value $ Cmd.opt "simple" $ Cmd.optInfo ["output-type", "t"]
+logType = Cmd.value $ Cmd.opt "binary" $ Cmd.optInfo ["output-type", "t"]
 
 logFile :: Cmd.Term (Maybe String)
 logFile = Cmd.value $ Cmd.opt Nothing $ Cmd.optInfo ["output-file", "o"]

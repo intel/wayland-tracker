@@ -65,7 +65,6 @@ type ObjectMap = IM.IntMap WInterfaceDescription
 
 getLogType :: String -> Maybe LogType
 getLogType s = case s of
-    "simple" -> Just Simple
     "binary" -> Just Binary
     "json" -> Just Json
     _ -> Nothing
@@ -361,6 +360,8 @@ processingThread ts xfs chan lh lt = do
                     putStrLnErr str
                     processData chan objectMap im
 
+        -- TODO: send an error message to the channel if we end here: it means
+        -- that something has gone wrong with the XML files.
 
 rwloop :: MessageType -> Socket.Socket -> Socket.Socket ->
         STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
