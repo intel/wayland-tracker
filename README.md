@@ -1,0 +1,128 @@
+WAYLAND-TRACKER
+===============
+
+Wayland-tracker is a Wayland message protocol dumper.
+
+Using wayland-tracker
+---------------------
+
+Wayland-tracker sits between Wayland server (such as Weston) and a Wayland
+client, dumping all message traffic to both directions.
+
+For instance, command
+
+    wayland-tracker -t binary -- weston-terminal
+
+might print out this data (and more):
+
+    [0.012587s   ] Request sender=1  op=0  size=12  03000000
+    [0.012587s   ] Request sender=1  op=1  size=12  02000000
+    [0.012968s   ] Event   sender=1  op=1  size=12  03000000
+    [0.012968s   ] Event   sender=3  op=0  size=12  34090000
+    [0.012968s   ] Event   sender=2  op=0  size=36  12000000 0e000000 73637265 656e7368 6f6f7465 72006765 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=40  11000000 12000000 776f726b 73706163 655f6d61 6e616765 72000000 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=32  10000000 0c000000 73637265 656e7361 76657200 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=36  0f000000 0e000000 6465736b 746f705f 7368656c 6c000000 02000000
+    [0.012968s   ] Event   sender=2  op=0  size=32  0e000000 0a000000 7864675f 7368656c 6c00616e 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=32  0d000000 09000000 776c5f73 68656c6c 0070616e 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=36  0c000000 0f000000 776c5f69 6e707574 5f70616e 656c0000 01000000
+    [0.012968s   ] Event   sender=2  op=0  size=32  0b000000 0a000000 776c5f6f 75747075 74006574 02000000
+    [0.012968s   ] Event   sender=2  op=0  size=36  0a000000 10000000 776c5f69 6e707574 5f6d6574 686f6400 01000000
+
+Wayland-tracker has two usage modes: `binary` and `json`. Binary mode outputs
+the wayland messages in binary format, and json mode outputs the messages in
+JSON format. To use JSON format, you need to have the protocol description XML
+files that are being used by the application and server you are running. The XML
+protocol files are provided using `-x` command line option.
+
+Again, for example, command
+
+    wayland-tracker -t json -x wayland.xml -x xdg-shell.xml -- weston-terminal
+
+might print out this data:
+
+    {"message":{"name":"sync","type":"Request","arguments":[{"name":"callback","value":{"value":3,"type":"NewId"}}],"interface":"wl_display"},"timestamp":"0.072162s"}
+    {"message":{"name":"get_registry","type":"Request","arguments":[{"name":"registry","value":{"value":2,"type":"NewId"}}],"interface":"wl_display"},"timestamp":"0.072162s"}
+    {"message":{"name":"delete_id","type":"Event","arguments":[{"name":"id","value":{"value":3,"type":"UInt"}}],"interface":"wl_display"},"timestamp":"0.07244s"}
+    {"message":{"name":"done","type":"Event","arguments":[{"name":"callback_data","value":{"value":2458,"type":"UInt"}}],"interface":"wl_callback"},"timestamp":"0.07244s"}
+    {"message":{"name":"global","type":"Event","arguments":[{"name":"name","value":{"value":18,"type":"UInt"}},{"name":"interface","value":{"value":"screenshooter","type":"UInt"}},{"name":"version","value":{"value":1,"type":"UInt"}}],"interface":"wl_registry"},"timestamp":"0.07244s"}
+
+You will need a JSON pretty-printer to appreciate the individual JSON messages
+more:
+
+    {
+        "message": {
+            "name": "keymap",
+            "type": "Event",
+            "arguments": [
+                {
+                    "name": "format",
+                    "value": {
+                        "value": 1,
+                        "type": "UInt"
+                    }
+                },
+                {
+                    "name": "fd",
+                    "value": {
+                        "type": "Fd"
+                    }
+                },
+                {
+                    "name": "size",
+                    "value": {
+                        "value": 50571,
+                        "type": "UInt"
+                    }
+                }
+            ],
+            "interface": "wl_keyboard"
+        },
+        "timestamp": "0.07142s"
+    }
+
+A good place to find the protocol XML files are the Wayland and Weston git
+repositiories.
+
+The diagnostic output from wayland-tracker and all of the application output are
+redirected to stderr, while the message dump is provided to stdout. This means
+that you can redirect the application output elsewhere using the normal command
+line semantics:
+    
+    wayland-tracker -t binary -- weston-terminal 2> /dev/null
+
+You can also use command line option `-o` to direct the message dump to a file.
+
+The application and its command line parameters are provided after `--` in the
+command line:
+
+    wayland-tracker -t binary -- weston-terminal --help
+
+
+Building wayland-tracker
+------------------------
+
+Wayland-tracker is written in Haskell. To build the software, you need to first
+install ghc, gcc and cabal using your package manager. For instance, in Fedora
+20, you would say:
+
+    sudo yum install cabal-install ghc gcc
+
+Then, in the source repository update the cabal package database:
+
+    cabal update
+
+Install all dependencies of wayland-tracker:
+
+    cabal install --only-dependencies
+
+And finally configure and build:
+
+    cabal configure
+    cabal build
+
+The binary will be in `dist/build/wayland-tracker/wayland-tracker` directory. To
+install it in `$HOME/.cabal/bin/wayland-tracker`, use
+
+    cabal install
+
