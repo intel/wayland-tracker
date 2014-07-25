@@ -33,7 +33,7 @@ import qualified Data.Attoparsec.ByteString as A
 -- import qualified Data.Attoparsec.Combinator as AC
 import qualified Data.Attoparsec.Binary as AB
 -- import qualified Data.Time as Time
-import qualified Data.Time.Clock.POSIX as Clock
+import qualified Data.Time.Clock as Clock
 
 import Control.Applicative
 
@@ -61,11 +61,6 @@ getLogType s = case s of
     "json" -> Just Json
     _ -> Nothing
 
-
-generateTS :: IO String
-generateTS = do
-    time <- Clock.getPOSIXTime
-    return $ "[" ++ (show time) ++ "]"
 
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
@@ -278,10 +273,10 @@ parseData t om im bs msgs =
                     else parseData t newOm im i (msg:msgs)
 
 
-processingThread :: [String] ->
+processingThread :: (Clock.UTCTime -> Clock.NominalDiffTime) -> [String] ->
                     STM.TChan (MessageType, BS.ByteString, [Int]) ->
                     IO.Handle -> LogType -> IO ()
-processingThread xfs chan lh lt = do
+processingThread ts xfs chan lh lt = do
 
     -- read the protocol file(s)
 
@@ -308,12 +303,13 @@ processingThread xfs chan lh lt = do
             (t, bs, _) <- STM.atomically $ STM.readTChan input
 
             -- Everything read in one go will have the same timestamp
-            ts <- generateTS
+            currentTime <- Clock.getCurrentTime
+            let timeStamp = ts currentTime
 
             let r = parseBinaryData t bs []
             case r of
                 Right msgs -> do
-                    mapM_ (writeBinaryLog logger ts) msgs
+                    mapM_ (writeBinaryLog logger timeStamp) msgs
                     processBinaryData chan
                 Left str -> do
                     putStrLn str
@@ -322,7 +318,8 @@ processingThread xfs chan lh lt = do
         processData input objectMap im = do
             (t, bs, _) <- STM.atomically $ STM.readTChan input
 
-            ts <- generateTS
+            currentTime <- Clock.getCurrentTime
+            let timeStamp = ts currentTime
 
             -- Logging file descriptors doesn't make much sense, because the
             -- fd numbers will anyway change when they are passed over the
@@ -333,7 +330,7 @@ processingThread xfs chan lh lt = do
                 Right (msgs, newObjectMap) -> do
                     -- writeToLog msgs bs
                     putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
-                    mapM_ (writeLog logger ts) msgs
+                    mapM_ (writeLog logger timeStamp) msgs
                     processData chan newObjectMap im
                 Left str -> do
                     putStrLn str
@@ -457,6 +454,9 @@ readXmlData (xf:xfs) mapping = do
                 else Just $ DM.union imap m
 
 
+timeSinceStart :: Clock.UTCTime -> Clock.UTCTime -> Clock.NominalDiffTime
+timeSinceStart beginning current = Clock.diffUTCTime current beginning
+
 runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
 runApplication xfs lt lf cmd cmdargs = do
 
@@ -470,6 +470,9 @@ runApplication xfs lt lf cmd cmdargs = do
         then return IO.stdout
         else IO.openFile (Maybe.fromJust lf) IO.ReadMode
 
+    beginning <- Clock.getCurrentTime
+    let ts = timeSinceStart beginning
+
     -- read the WAYLAND_DISPLAY environment variable
 
     loggerChan <- STM.newTChanIO
@@ -478,7 +481,7 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ processingThread xfs loggerChan logHandle (Maybe.fromJust logFormat)
+    _ <- CC.forkIO $ processingThread ts xfs loggerChan logHandle (Maybe.fromJust logFormat)
 
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")

@@ -9,10 +9,14 @@ import qualified Data.ByteString.Base16 as B16
 -- import qualified Data.ByteString.UTF8 as U
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson as A
+import qualified Data.Time.Clock as Clock
 
 import Types
 
 -- TODO: use ByteString for all string manipulation purposes
+
+generateTS :: Clock.NominalDiffTime -> String
+generateTS time = "[" ++ (show time) ++ "]"
 
 bSpace :: C8.ByteString
 bSpace = C8.singleton $ head " "
@@ -34,8 +38,10 @@ getMessageTypeString :: MessageType -> String
 getMessageTypeString Event = "Event  "
 getMessageTypeString Request = "Request"
 
-writeBinaryLog :: Logger -> String -> ParsedBinaryMessage -> IO ()
-writeBinaryLog (Logger lh _) ts msg = BS.hPut lh $ toStringBinary ts msg
+writeBinaryLog :: Logger -> Clock.NominalDiffTime -> ParsedBinaryMessage -> IO ()
+writeBinaryLog (Logger lh _) ts msg = do
+    let stamp = generateTS ts
+    BS.hPut lh $ toStringBinary stamp msg
 
-writeLog :: Logger -> String -> ParsedMessage -> IO ()
+writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
 writeLog logger ts msg = return ()
