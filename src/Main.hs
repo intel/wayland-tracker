@@ -4,7 +4,7 @@ import Control.Applicative
 import Tracker
 
 xmlFiles :: Cmd.Term [String]
-xmlFiles = Cmd.nonEmpty $ Cmd.optAll [] $ Cmd.optInfo ["xml-file", "x"]
+xmlFiles = Cmd.value $ Cmd.optAll [] $ Cmd.optInfo ["xml-file", "x"]
 
 logType :: Cmd.Term String
 logType = Cmd.value $ Cmd.opt "simple" $ Cmd.optInfo ["output-type", "t"]
