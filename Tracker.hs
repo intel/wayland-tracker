@@ -196,7 +196,7 @@ binaryMessageParser t = do
 
     msgData <- A.take (size - 8)
 
-    return $ ParsedBinaryMessage t senderId size opCode msgData
+    return $ ParsedBinaryMessage t senderId opCode size msgData
 
 isNewId :: MArgument -> Bool
 isNewId (MArgument _ (MNewId _ _)) = True
