@@ -1,27 +1,20 @@
 module Tracker where
 
--- import qualified Data.Word as W
--- import qualified Foreign.C.Types as C
--- import qualified Data.Binary.Strict.Get as BG
+import qualified Data.Binary.Strict.BitGet as BG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
--- import qualified Data.ByteString.Lazy as BSL
 import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
 import qualified System.Exit as Exit
--- import qualified System.Posix.Env as PE
 import qualified System.Posix.User as PU
 import qualified System.Posix.IO as PI
 import qualified System.Posix.Process as Process
 import qualified System.Posix.Signals as Signals
 import qualified System.Posix.Types as PT
 import qualified Network.Socket as Socket
--- import qualified Network.Socket.ByteString as BSocket
--- import qualified System.IO as SIO
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
--- import qualified Control.Concurrent.STM.TChan as T
 import qualified Control.Monad.Error as ET
 import qualified Numeric as N
 import qualified Data.Maybe as Maybe
@@ -30,19 +23,13 @@ import qualified Data.IntMap as IM
 import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
 import qualified Data.Attoparsec.ByteString as A
--- import qualified Data.Attoparsec.Combinator as AC
 import qualified Data.Attoparsec.Binary as AB
--- import qualified Data.Time as Time
 import qualified Data.Time.Clock as Clock
-
-import Control.Applicative
 
 import Types
 import Log
 import ParseWaylandXML
 import Wayland
-
--- import Debug.Trace
 
 data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
     deriving (Show, Eq)
@@ -100,10 +87,21 @@ newIdParser interface = do
     return $ MNewId (fromIntegral v) interface
 
 
+getFixedValues :: BS.ByteString -> Either String (Bool, Int, Int)
+getFixedValues w = BG.runBitGet w $ do
+    sign <- BG.getBit
+    f <- BG.getAsWord32 23
+    s <- BG.getAsWord8 8
+    return (sign, fromIntegral f, fromIntegral s)
+
+
 fixedParser :: A.Parser MArgumentValue
 fixedParser = do
-    v <- AB.anyWord32le
-    return $ MFixed True 0 $ fromIntegral v -- TODO
+    bs <- A.take 4
+    let values = getFixedValues bs
+    case values of
+        Right (sign, f, s) -> return $ MFixed sign f s
+        Left _ -> return $ MFixed True 0 0
 
 
 stringParser :: A.Parser MArgumentValue
@@ -164,22 +162,22 @@ messageParser om _ t = do
     opCodeW <- AB.anyWord16le
     msgSizeW <- AB.anyWord16le
 
-    let senderId = fromIntegral senderIdW
-    let msgSize = fromIntegral msgSizeW
-    let opCode = fromIntegral opCodeW
+    let sId = fromIntegral senderIdW
+    let size = fromIntegral msgSizeW
+    let op = fromIntegral opCodeW
 
-    case IM.lookup senderId om of
-        Just interfaceDescription -> case IM.lookup opCode (getMap t interfaceDescription) of
+    case IM.lookup sId om of
+        Just interfaceDescription -> case IM.lookup op (getMap t interfaceDescription) of
             Just messageDescription -> do
                 let messageName = msgDescrName messageDescription
                 let interfaceName = interfaceDescrName interfaceDescription
                 args <- messageDataParser messageDescription
                 return $ Message t messageName interfaceName args
             Nothing -> do
-                A.take (msgSize - 8)
+                A.take (size - 8)
                 return UnknownMessage
         Nothing -> do
-            A.take (msgSize - 8)
+            A.take (size - 8)
             return UnknownMessage
 
     where
@@ -195,14 +193,13 @@ binaryMessageParser t = do
     opCodeW <- AB.anyWord16le
     msgSizeW <- AB.anyWord16le
 
-    let senderId = fromIntegral senderIdW
+    let sId = fromIntegral senderIdW
     let size = fromIntegral msgSizeW
-    let opCode = fromIntegral opCodeW
+    let op = fromIntegral opCodeW
 
+    msgBs <- A.take (size - 8)
 
-    msgData <- A.take (size - 8)
-
-    return $ ParsedBinaryMessage t senderId opCode size msgData
+    return $ ParsedBinaryMessage t sId op size msgBs
 
 isNewId :: MArgument -> Bool
 isNewId (MArgument _ (MNewId _ _)) = True
@@ -343,9 +340,9 @@ processingThread ts xfs chan lh lt = do
                     processData chan objectMap im
 
 
-loop :: MessageType -> Socket.Socket -> Socket.Socket ->
+rwloop :: MessageType -> Socket.Socket -> Socket.Socket ->
         STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
-loop t inputSock outputSock logger =  do
+rwloop t inputSock outputSock logger =  do
 
     let direction = if t == Request
         then "client"
@@ -361,7 +358,7 @@ loop t inputSock outputSock logger =  do
 
     STM.atomically $ STM.writeTChan logger (t, bs, fds)
 
-    loop t inputSock outputSock logger
+    rwloop t inputSock outputSock logger
 
 
 {-
@@ -400,14 +397,14 @@ fixInterface (WInterfaceDescription n rs es) =
 clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
                 STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 clientThread eventV clientSock serverSock loggerChan = do
-    loop Request clientSock serverSock loggerChan
+    rwloop Request clientSock serverSock loggerChan
     STM.atomically $ STM.putTMVar eventV ClientClosedSocket
 
 
 serverThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
                 STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 serverThread eventV serverSock clientSock loggerChan = do
-    loop Event serverSock clientSock loggerChan
+    rwloop Event serverSock clientSock loggerChan
     STM.atomically $ STM.putTMVar eventV ServerClosedSocket
 
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Log (
     writeLog,
@@ -9,21 +9,20 @@ where
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Base16 as B16
--- import qualified Data.ByteString.UTF8 as U
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson as A
 import qualified Data.Time.Clock as Clock
-import GHC.Generics
 
 import Types
 
-data StampedMessage = StampedMessage String ParsedMessage deriving (Eq, Show, Generic)
+data StampedMessage = StampedMessage String ParsedMessage deriving (Eq, Show)
 
-instance A.ToJSON MessageType
-instance A.ToJSON MArgumentValue
-instance A.ToJSON MArgument
-instance A.ToJSON ParsedMessage
-instance A.ToJSON StampedMessage
+instance A.ToJSON StampedMessage where
+    toJSON (StampedMessage time msg) = A.object
+        [ "timestamp" A..= time, "message" A..= msg ]
+
+
+
 
 -- make bytestring length at least specified
 padBs :: Int -> BS.ByteString -> BS.ByteString
