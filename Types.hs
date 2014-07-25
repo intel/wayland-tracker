@@ -15,7 +15,7 @@ import qualified Data.ByteString as BS
 import qualified System.IO as IO
 import GHC.Generics
 
-data MessageType = Request | Event deriving (Eq, Show)
+data MessageType = Request | Event deriving (Eq, Show, Generic)
 
 data MArgumentValue = MInt Int
                     | MUInt Int
@@ -40,7 +40,7 @@ data ParsedMessage = UnknownMessage
                          msgName :: String,
                          msgInterface :: String,
                          msgArguments :: [MArgument]
-                     } deriving (Eq, Show,  Generic)
+                     } deriving (Eq, Show, Generic)
 
 data ParsedBinaryMessage = ParsedBinaryMessage {
                                 binaryMsgType :: MessageType,
@@ -48,7 +48,7 @@ data ParsedBinaryMessage = ParsedBinaryMessage {
                                 opCode :: Int,
                                 msgSize :: Int,
                                 msgData :: BS.ByteString
-                           }
+                           } deriving (Eq, Show, Generic)
 
 data LogType = Simple | Binary | Json
 

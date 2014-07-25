@@ -329,7 +329,7 @@ processingThread ts xfs chan lh lt = do
             case r of
                 Right (msgs, newObjectMap) -> do
                     -- writeToLog msgs bs
-                    putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
+                    -- putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
                     mapM_ (writeLog logger timeStamp) msgs
                     processData chan newObjectMap im
                 Left str -> do

@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
+
 module Log (
     writeLog,
     writeBinaryLog)
@@ -5,15 +7,23 @@ module Log (
 where
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Base16 as B16
 -- import qualified Data.ByteString.UTF8 as U
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson as A
 import qualified Data.Time.Clock as Clock
+import GHC.Generics
 
 import Types
 
--- TODO: use ByteString for all string manipulation purposes
+data StampedMessage = StampedMessage String ParsedMessage deriving (Eq, Show, Generic)
+
+instance A.ToJSON MessageType
+instance A.ToJSON MArgumentValue
+instance A.ToJSON MArgument
+instance A.ToJSON ParsedMessage
+instance A.ToJSON StampedMessage
 
 -- make bytestring length at least specified
 padBs :: Int -> BS.ByteString -> BS.ByteString
@@ -29,7 +39,7 @@ padBs neededSize bs =
 -- split bytestring at chunkSize with another bytestring in between
 -- 12345678 can become 12 34 56 78
 splitBs :: Int -> BS.ByteString -> BS.ByteString -> BS.ByteString
-splitBs chunkSize between bs = BS.intercalate between $ split bs []
+splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
     where
         split bs acc =
             if BS.null bs
@@ -68,4 +78,8 @@ writeBinaryLog (Logger lh _) ts msg = do
     BS.hPut lh $ toStringBinary stamp msg
 
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
-writeLog logger ts msg = return ()
+writeLog (Logger lh _) ts msg = do
+    -- let stamp = generateTS ts
+    let smsg = StampedMessage (show ts) msg
+    BSL.hPut lh $ A.encode smsg
+    BS.hPut lh bNewLine
