@@ -36,6 +36,7 @@ where
 import qualified Data.ByteString as BS
 import qualified Data.Aeson as A
 import qualified System.IO as IO
+import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Base16 as B16
 import qualified Numeric as N
 
@@ -91,8 +92,9 @@ instance A.ToJSON MArgumentValue where
         MUInt v -> A.object [ "type" A..= A.String "UInt", "value" A..= v ]
         MString v -> A.object [ "type" A..= A.String "UInt", "value" A..= v ]
         MFixed _ _ _ -> A.object [ "type" A..= A.String "Fixed",
-                                        "value" A..= fixedToFloat value ]
-        MArray bs -> A.object [ "type" A..= A.String "Array", "value" A..= B16.encode bs ]
+                                   "value" A..= fixedToFloat value ]
+        MArray bs -> A.object [ "type" A..= A.String "Array",
+                                "value" A..= (C8.unpack $ B16.encode bs) ]
         MFd -> A.object [ "type" A..= A.String "Fd" ]
         MNewId v _ -> A.object [ "type" A..= A.String "NewId", "value" A..= v ]
         MObject v -> A.object [ "type" A..= A.String "Object", "value" A..= v ]
