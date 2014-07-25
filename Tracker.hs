@@ -62,6 +62,12 @@ getLogType s = case s of
     _ -> Nothing
 
 
+putStrLnErr :: String -> IO ()
+putStrLnErr s = do
+    IO.hPutStr IO.stderr s
+    IO.hPutStr IO.stderr "\n"
+
+
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
         M.mapM_ (\n -> putStr $ N.showHex n " ") bytes
@@ -285,7 +291,7 @@ processingThread ts xfs chan lh lt = do
         _ -> do
             xmlData <- readXmlData xfs DM.empty
             case getXmlData xmlData of
-                Nothing -> putStrLn "reading or parsing of XML files failed"
+                Nothing -> putStrLnErr "reading or parsing of XML files failed"
                 Just (im, displayDescr) -> do
                     -- initialize object map with known global mapping 1 -> "wl_display"
                     let objectMap = IM.insert 1 displayDescr IM.empty
@@ -312,7 +318,7 @@ processingThread ts xfs chan lh lt = do
                     mapM_ (writeBinaryLog logger timeStamp) msgs
                     processBinaryData chan
                 Left str -> do
-                    putStrLn str
+                    putStrLnErr str
                     processBinaryData chan
 
         processData input objectMap im = do
@@ -333,7 +339,7 @@ processingThread ts xfs chan lh lt = do
                     mapM_ (writeLog logger timeStamp) msgs
                     processData chan newObjectMap im
                 Left str -> do
-                    putStrLn str
+                    putStrLnErr str
                     processData chan objectMap im
 
 
@@ -405,17 +411,37 @@ serverThread eventV serverSock clientSock loggerChan = do
     STM.atomically $ STM.putTMVar eventV ServerClosedSocket
 
 
-execProcess :: FilePath -> [String] -> Socket.Socket -> IO a
-execProcess path args sock = do
-    let fd = show $ Socket.fdSocket sock
+-- ioThread reads input from child and outputs it to stderr
+ioThread :: PT.Fd -> IO ()
+ioThread fd = M.forever loop
+    where
+        loop = do
+            CC.threadWaitRead $ fromIntegral fd
+            (str, _) <- PI.fdRead fd 4096
+            IO.hPutStr IO.stderr str
+
+
+execProcess :: FilePath -> [String] -> Socket.Socket -> PT.Fd -> IO a
+execProcess path args sock fd = do
+    let wFd = show $ Socket.fdSocket sock
 
     env <- E.getEnvironment
     let filteredEnv = filter (\x -> fst x /= "WAYLAND_SOCKET") env
 
-    -- TODO: channel client stdout, stderr to this process' stderr
+    -- channel client stdout, stderr to this process' stderr
 
-    putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
-    Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", fd):filteredEnv)
+    -- IO.hClose IO.stdin
+    IO.hClose IO.stdout
+    IO.hClose IO.stderr
+
+    -- PI.dupTo fd PI.stdInput
+    PI.dupTo fd PI.stdOutput
+    PI.dupTo fd PI.stdError
+
+    PI.closeFd fd
+
+    -- putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
+    Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", wFd):filteredEnv)
     -- Process.executeFile path True args (Just filteredEnv)
 
 
@@ -463,7 +489,7 @@ runApplication xfs lt lf cmd cmdargs = do
     let logFormat = getLogType lt
 
     ET.when (Maybe.isNothing logFormat) $ do
-        putStrLn $ "unknown log format type " ++ lt ++ "; known types are simple, binary and json"
+        putStrLnErr $ "unknown log format type " ++ lt ++ "; known types are binary and json"
         Exit.exitFailure
 
     logHandle <- if Maybe.isNothing lf
@@ -494,11 +520,15 @@ runApplication xfs lt lf cmd cmdargs = do
 
     let serverPath = xdgDir ++ "/" ++ serverName
 
-    putStrLn $ "Connecting to " ++ serverPath
+    putStrLnErr $ "Connecting to " ++ serverPath
 
     Socket.connect serverSock (Socket.SockAddrUnix serverPath)
 
-    -- create socket for the child and start a thread for it
+    -- create stdin/stdout/stderr socket pair for the child
+    (ourReadFd, childWriteFd) <- PI.createPipe
+    PI.setFdOption ourReadFd PI.CloseOnExec True
+
+    -- create wayland socket for the child and start a thread for it
 
     (clientSock, trackerSock) <- Socket.socketPair Socket.AF_UNIX Socket.Stream Socket.defaultProtocol
 
@@ -510,9 +540,11 @@ runApplication xfs lt lf cmd cmdargs = do
 
     _ <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
 
+    _ <- CC.forkIO $ ioThread ourReadFd
+
     -- fork the child
 
-    pid <- Process.forkProcess $ execProcess cmd cmdargs trackerSock
+    pid <- Process.forkProcess $ execProcess cmd cmdargs trackerSock childWriteFd
 
     Socket.close trackerSock
 
@@ -524,16 +556,16 @@ runApplication xfs lt lf cmd cmdargs = do
 
         case e of
             SigInt -> do
-                putStrLn "sigINT received"
+                putStrLnErr "sigINT received"
                 Exit.exitSuccess
             SigChld -> do
-                putStrLn "sigCHLD received"
+                putStrLnErr "sigCHLD received"
                 Exit.exitSuccess
             ServerClosedSocket -> do
-                putStrLn "server closed socket"
+                putStrLnErr "server closed socket"
                 Signals.signalProcess Signals.sigINT pid
                 Exit.exitFailure
             ClientClosedSocket -> do
-                putStrLn "client closed socket"
+                putStrLnErr "client closed socket"
                 Exit.exitSuccess
 

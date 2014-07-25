@@ -22,14 +22,7 @@ term :: Cmd.Term (IO ())
 term = program <$> xmlFiles <*> logType <*> logFile <*> command <*> commandArgs
 
 program :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
-program xfs lt lf cmd cmdargs = do
-  print xfs
-  print lt
-  print lf
-  print cmd
-  print cmdargs
-  runApplication xfs lt lf cmd cmdargs
-  return ()
+program xfs lt lf cmd cmdargs = runApplication xfs lt lf cmd cmdargs
 
 termInfo :: Cmd.TermInfo
 termInfo = Cmd.defTI { Cmd.termName = "wayland-tracker", Cmd.version = "0.1" }
