@@ -25,6 +25,7 @@ module Tracker where
 import qualified Data.Binary.Strict.BitGet as BG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
+import qualified Data.Word as W
 import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Environment as E
@@ -47,6 +48,7 @@ import qualified Data.List as List
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Binary as AB
 import qualified Data.Time.Clock as Clock
+import qualified System.Endian as Endian
 
 import Types
 import Log
@@ -61,6 +63,20 @@ type InterfaceMap = DM.Map String WInterfaceDescription
 
 -- mapping of bound object ids to interfaces
 type ObjectMap = IM.IntMap WInterfaceDescription
+
+
+anyWord32he :: A.Parser W.Word32
+anyWord32he =
+    case Endian.getSystemEndianness of
+        Endian.LittleEndian -> AB.anyWord32le
+        Endian.BigEndian -> AB.anyWord32be
+
+
+anyWord16he :: A.Parser W.Word16
+anyWord16he =
+    case Endian.getSystemEndianness of
+        Endian.LittleEndian -> AB.anyWord16le
+        Endian.BigEndian -> AB.anyWord16be
 
 
 getLogType :: String -> Maybe LogType
@@ -86,25 +102,25 @@ dumpByteString bs = do
 
 intParser :: A.Parser MArgumentValue
 intParser = do
-    v <- AB.anyWord32le
+    v <- anyWord32he
     return $ MInt $ fromIntegral v
 
 
 uintParser :: A.Parser MArgumentValue
 uintParser = do
-    v <- AB.anyWord32le
+    v <- anyWord32he
     return $ MUInt $ fromIntegral v
 
 
 objectParser :: A.Parser MArgumentValue
 objectParser = do
-    v <- AB.anyWord32le
+    v <- anyWord32he
     return $ MObject $ fromIntegral v
 
 
 newIdParser :: String -> A.Parser MArgumentValue
 newIdParser interface = do
-    v <- AB.anyWord32le
+    v <- anyWord32he
     return $ MNewId (fromIntegral v) interface
 
 
@@ -127,7 +143,7 @@ fixedParser = do
 
 stringParser :: A.Parser MArgumentValue
 stringParser = do
-    lenW <- AB.anyWord32le
+    lenW <- anyWord32he
     let dataLen = fromIntegral lenW
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
@@ -140,7 +156,7 @@ stringParser = do
 
 arrayParser :: A.Parser MArgumentValue
 arrayParser = do
-    lenW <- AB.anyWord32le
+    lenW <- anyWord32he
     let dataLen = fromIntegral lenW
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
@@ -179,9 +195,9 @@ messageDataParser (WMessageDescription _ msgArgs) = do
 
 messageParser :: ObjectMap -> InterfaceMap -> MessageType -> A.Parser ParsedMessage
 messageParser om _ t = do
-    senderIdW <- AB.anyWord32le
-    opCodeW <- AB.anyWord16le
-    msgSizeW <- AB.anyWord16le
+    senderIdW <- anyWord32he
+    opCodeW <- anyWord16he
+    msgSizeW <- anyWord16he
 
     let sId = fromIntegral senderIdW
     let size = fromIntegral msgSizeW
@@ -210,9 +226,9 @@ messageParser om _ t = do
 
 binaryMessageParser:: MessageType -> A.Parser ParsedBinaryMessage
 binaryMessageParser t = do
-    senderIdW <- AB.anyWord32le
-    opCodeW <- AB.anyWord16le
-    msgSizeW <- AB.anyWord16le
+    senderIdW <- anyWord32he
+    opCodeW <- anyWord16he
+    msgSizeW <- anyWord16he
 
     let sId = fromIntegral senderIdW
     let size = fromIntegral msgSizeW
