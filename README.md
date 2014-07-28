@@ -133,22 +133,25 @@ And finally configure and build:
     cabal build
 
 The binary will be in `dist/build/wayland-tracker/wayland-tracker` directory. To
-install it in `$HOME/.cabal/bin/wayland-tracker`, use
+install it in `$HOME/.cabal/bin/wayland-tracker`, use:
 
     cabal install
 
 Technical information
 ---------------------
 
-The low-level Wayland message sending/receiving is using C code that is directly based on Wayland library code for maximum compatibility. There is no direct Wayland dependency, however.
+The low-level Wayland message sending/receiving is using C code that is directly
+based on Wayland library code for maximum compatibility. There is no direct
+Wayland dependency, however.
 
-Message parsing is done using Attoparsec. JSON generation uses Aeson.
+Message parsing is done using [Attoparsec](https://github.com/bos/attoparsec).
+JSON generation uses [Aeson](https://github.com/bos/aeson).
 
 Future work and improvement ideas
 ---------------------------------
 
 * pretty-print JSON
-* "pcap" output mode for analysing log files with WireShark
+* ["pcap" output mode] (https://github.com/bos/pcap) for analysing log files with WireShark
 * "simple" output mode with human-readable output and one line messages
 * use quickcheck for testing parsing and log formats
 * handle message parsing and log output in separate OS thread?
