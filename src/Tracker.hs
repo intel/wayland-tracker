@@ -53,7 +53,7 @@ import Log
 import ParseWaylandXML
 import Wayland
 
-data Event = ServerClosedSocket | ClientClosedSocket | SigChld | SigInt
+data Event = ServerClosedSocket | ClientClosedSocket | ProcessingError | SigChld | SigInt
     deriving (Show, Eq)
 
 -- mapping of interface names to interfaces
@@ -297,10 +297,11 @@ parseData t om im bs msgs =
                     else parseData t newOm im i (msg:msgs)
 
 
-processingThread :: (Clock.UTCTime -> Clock.NominalDiffTime) -> [String] ->
+processingThread :: STM.TMVar Event ->
+                    (Clock.UTCTime -> Clock.NominalDiffTime) -> [String] ->
                     STM.TChan (MessageType, BS.ByteString, [Int]) ->
                     IO.Handle -> LogType -> IO ()
-processingThread ts xfs chan lh lt = do
+processingThread eventV ts xfs chan lh lt = do
 
     -- read the protocol file(s)
 
@@ -314,6 +315,11 @@ processingThread ts xfs chan lh lt = do
                     -- initialize object map with known global mapping 1 -> "wl_display"
                     let objectMap = IM.insert 1 displayDescr IM.empty
                     processData chan objectMap im
+
+    -- send an error message to the channel if we end here: it means
+    -- that something has gone wrong with the XML files.
+
+    STM.atomically $ STM.putTMVar eventV ProcessingError
 
     where
         getXmlData xmlData = do
@@ -360,8 +366,6 @@ processingThread ts xfs chan lh lt = do
                     putStrLnErr str
                     processData chan objectMap im
 
-        -- TODO: send an error message to the channel if we end here: it means
-        -- that something has gone wrong with the XML files.
 
 rwloop :: MessageType -> Socket.Socket -> Socket.Socket ->
         STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
@@ -527,8 +531,6 @@ runApplication xfs lt lf cmd cmdargs = do
     _ <- Signals.installHandler Signals.sigINT (Signals.Catch $ sigHandler Signals.sigINT eventV) Nothing
     _ <- Signals.installHandler Signals.sigCHLD (Signals.Catch $ sigHandler Signals.sigCHLD eventV) Nothing
 
-    _ <- CC.forkIO $ processingThread ts xfs loggerChan logHandle (Maybe.fromJust logFormat)
-
     xdgDir <- Err.catchIOError (E.getEnv "XDG_RUNTIME_DIR") createXdgPath
     serverName <- Err.catchIOError (E.getEnv "WAYLAND_DISPLAY") (\_ -> return "wayland-0")
 
@@ -554,7 +556,9 @@ runApplication xfs lt lf cmd cmdargs = do
 
     PI.setFdOption (PT.Fd $ Socket.fdSocket clientSock) PI.CloseOnExec True
 
-    -- start threads for communication
+    -- start threads for communication and processing
+
+    _ <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle (Maybe.fromJust logFormat)
 
     _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
 
@@ -588,4 +592,5 @@ runApplication xfs lt lf cmd cmdargs = do
             ClientClosedSocket -> do
                 putStrLnErr "client closed socket"
                 Exit.exitSuccess
-
+            ProcessingError -> do
+                Exit.exitSuccess
