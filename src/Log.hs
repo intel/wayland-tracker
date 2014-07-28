@@ -44,8 +44,6 @@ instance A.ToJSON StampedMessage where
         [ "timestamp" A..= time, "message" A..= msg ]
 
 
-
-
 -- make bytestring length at least specified
 padBs :: Int -> BS.ByteString -> BS.ByteString
 padBs neededSize bs =
@@ -57,8 +55,9 @@ padBs neededSize bs =
             then BS.append bs $ padding extra
             else bs
 
+
 -- split bytestring at chunkSize with another bytestring in between
--- 12345678 can become 12 34 56 78
+-- example: 123456789 becomes 12 34 56 78 9 if padding is two
 splitBs :: Int -> BS.ByteString -> BS.ByteString -> BS.ByteString
 splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
     where
@@ -70,14 +69,18 @@ splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
                      in
                         split ((BS.drop chunkSize) bs) (chunk:acc)
 
+
 generateTS :: Clock.NominalDiffTime -> BS.ByteString
 generateTS time = BS.concat $ [C8.pack "[", padBs 12 $ C8.pack (show time), C8.pack "]" ]
+
 
 bSpace :: C8.ByteString
 bSpace = C8.singleton ' '
 
+
 bNewLine :: C8.ByteString
 bNewLine = C8.singleton '\n'
+
 
 toStringBinary :: BS.ByteString -> ParsedBinaryMessage -> BS.ByteString
 toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
@@ -89,14 +92,17 @@ toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
     in
         BS.concat [ts, bSpace, typeS, bSpace, senderS, bSpace, opcodeS, bSpace, sizeS, bSpace, bSpace, dataS, bNewLine]
 
+
 getMessageTypeString :: MessageType -> BS.ByteString
 getMessageTypeString Event = C8.pack "Event"
 getMessageTypeString Request = C8.pack "Request"
+
 
 writeBinaryLog :: Logger -> Clock.NominalDiffTime -> ParsedBinaryMessage -> IO ()
 writeBinaryLog (Logger lh _) ts msg = do
     let stamp = generateTS ts
     BS.hPut lh $ toStringBinary stamp msg
+
 
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
 writeLog (Logger lh lt) ts msg = do
