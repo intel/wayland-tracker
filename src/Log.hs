@@ -81,7 +81,7 @@ bNewLine = C8.singleton '\n'
 
 toStringBinary :: BS.ByteString -> ParsedBinaryMessage -> BS.ByteString
 toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
-    let typeS = C8.pack $ getMessageTypeString t
+    let typeS = padBs 7 $ getMessageTypeString t
         senderS = BS.concat [C8.pack "sender=", padBs 2 $ C8.pack (show sender)]
         opcodeS = BS.concat [C8.pack "op=", padBs 2 $ C8.pack (show opcode)]
         sizeS = BS.concat [C8.pack "size=", padBs 2 $ C8.pack (show size)]
@@ -89,9 +89,9 @@ toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
     in
         BS.concat [ts, bSpace, typeS, bSpace, senderS, bSpace, opcodeS, bSpace, sizeS, bSpace, bSpace, dataS, bNewLine]
 
-getMessageTypeString :: MessageType -> String
-getMessageTypeString Event = "Event  "
-getMessageTypeString Request = "Request"
+getMessageTypeString :: MessageType -> BS.ByteString
+getMessageTypeString Event = C8.pack "Event"
+getMessageTypeString Request = C8.pack "Request"
 
 writeBinaryLog :: Logger -> Clock.NominalDiffTime -> ParsedBinaryMessage -> IO ()
 writeBinaryLog (Logger lh _) ts msg = do
