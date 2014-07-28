@@ -1,7 +1,8 @@
 WAYLAND-TRACKER
 ===============
 
-Wayland-tracker is a Wayland message protocol dumper.
+Wayland-tracker is a Wayland message protocol dumper, licensed with the Wayland
+MIT license.
 
 Using wayland-tracker
 ---------------------
@@ -31,11 +32,17 @@ might print out this data (and more):
 
 Wayland-tracker has two usage modes: `binary` and `json`. Binary mode outputs
 the wayland messages in binary format, and json mode outputs the messages in
-JSON format. To use JSON format, you need to have the protocol description XML
-files that are being used by the application and server you are running. The XML
-protocol files are provided using `-x` command line option.
+JSON format. More output format options are expected in the future.
 
-Again, for example, command
+The binary format log contains first the time stamp since program launch, then
+parsed Wayland message heades (sender, opcode, and message size). The message
+data is then printed out in hexadecimal format split into 32-bit words.
+
+To use JSON format, you need to have the protocol description XML files that are
+being used by the application and server you are running. The XML protocol files
+are provided using `-x` command line option.
+
+For example, command
 
     wayland-tracker -t json -x wayland.xml -x xdg-shell.xml -- weston-terminal
 
@@ -48,7 +55,7 @@ might print out this data:
     {"message":{"name":"global","type":"Event","arguments":[{"name":"name","value":{"value":18,"type":"UInt"}},{"name":"interface","value":{"value":"screenshooter","type":"UInt"}},{"name":"version","value":{"value":1,"type":"UInt"}}],"interface":"wl_registry"},"timestamp":"0.07244s"}
 
 You will need a JSON pretty-printer to appreciate the individual JSON messages
-more:
+better:
 
     {
         "message": {
@@ -88,7 +95,7 @@ The diagnostic output from wayland-tracker and all of the application output are
 redirected to stderr, while the message dump is provided to stdout. This means
 that you can redirect the application output elsewhere using the normal command
 line semantics:
-    
+
     wayland-tracker -t binary -- weston-terminal 2> /dev/null
 
 You can also use command line option `-o` to direct the message dump to a file.
@@ -102,11 +109,15 @@ command line:
 Building wayland-tracker
 ------------------------
 
-Wayland-tracker is written in Haskell. To build the software, you need to first
-install ghc, gcc and cabal using your package manager. For instance, in Fedora
-20, you would say:
+Wayland-tracker is written (mostly) in Haskell. To build the software, you need
+to first install ghc, gcc and cabal using your package manager. For instance, in
+Fedora 20, you would say:
 
     sudo yum install cabal-install ghc gcc
+
+In Ubuntu 14.04 a similar command would be:
+
+    sudo yum install cabal-install ghc build-essentials
 
 Then, in the source repository update the cabal package database:
 
@@ -125,4 +136,21 @@ The binary will be in `dist/build/wayland-tracker/wayland-tracker` directory. To
 install it in `$HOME/.cabal/bin/wayland-tracker`, use
 
     cabal install
+
+Technical information
+---------------------
+
+The low-level Wayland message sending/receiving is using C code that is directly based on Wayland library code for maximum compatibility. There is no direct Wayland dependency, however.
+
+Message parsing is done using Attoparsec. JSON generation uses Aeson.
+
+Future work and improvement ideas
+---------------------------------
+
+* pretty-print JSON
+* "pcap" output mode for analysing log files with WireShark
+* "simple" output mode with human-readable output and one line messages
+* use quickcheck for testing parsing and log formats
+* handle message parsing and log output in separate OS thread?
+* use hashmap instead of trees in static maps (such as interfaces)
 
