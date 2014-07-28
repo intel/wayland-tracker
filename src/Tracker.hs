@@ -39,7 +39,7 @@ import qualified Network.Socket as Socket
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Monad.Error as ET
-import qualified Numeric as N
+-- import qualified Numeric as N
 import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
@@ -64,6 +64,8 @@ type InterfaceMap = DM.Map String WInterfaceDescription
 -- mapping of bound object ids to interfaces
 type ObjectMap = IM.IntMap WInterfaceDescription
 
+
+-- read values in correct endianness
 
 anyWord32he :: A.Parser W.Word32
 anyWord32he =
@@ -92,12 +94,15 @@ putStrLnErr s = do
     IO.hPutStr IO.stderr "\n"
 
 
+{-
+-- debug: dump a bytestring in hex format to stdout
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
         M.mapM_ (\n -> putStr $ N.showHex n " ") bytes
         putStrLn ""
     where
         bytes = BS.unpack bs
+-}
 
 
 intParser :: A.Parser MArgumentValue
@@ -124,14 +129,6 @@ newIdParser interface = do
     return $ MNewId (fromIntegral v) interface
 
 
-getFixedValues :: BS.ByteString -> Either String (Bool, Int, Int)
-getFixedValues w = BG.runBitGet w $ do
-    sign <- BG.getBit
-    f <- BG.getAsWord32 23
-    s <- BG.getAsWord8 8
-    return (sign, fromIntegral f, fromIntegral s)
-
-
 fixedParser :: A.Parser MArgumentValue
 fixedParser = do
     bs <- A.take 4
@@ -139,6 +136,13 @@ fixedParser = do
     case values of
         Right (sign, f, s) -> return $ MFixed sign f s
         Left _ -> return $ MFixed True 0 0
+    where
+        getFixedValues :: BS.ByteString -> Either String (Bool, Int, Int)
+        getFixedValues w = BG.runBitGet w $ do
+            sign <- BG.getBit
+            f <- BG.getAsWord32 23
+            s <- BG.getAsWord8 8
+            return (sign, fromIntegral f, fromIntegral s)
 
 
 stringParser :: A.Parser MArgumentValue
@@ -237,6 +241,7 @@ binaryMessageParser t = do
     msgBs <- A.take (size - 8)
 
     return $ ParsedBinaryMessage t sId op size msgBs
+
 
 isNewId :: MArgument -> Bool
 isNewId (MArgument _ (MNewId _ _)) = True
@@ -470,6 +475,8 @@ execProcess path args sock fd = do
 
     -- channel client stdout, stderr to this process' stderr
 
+    -- TODO: we need to handle stdin also, but in a separate thread
+
     -- IO.hClose IO.stdin
     IO.hClose IO.stdout
     IO.hClose IO.stderr
@@ -480,9 +487,8 @@ execProcess path args sock fd = do
 
     PI.closeFd fd
 
-    -- putStrLn $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
+    -- putStrLnErr $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
     Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", wFd):filteredEnv)
-    -- Process.executeFile path True args (Just filteredEnv)
 
 
 createXdgPath :: a -> IO String
