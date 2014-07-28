@@ -99,8 +99,13 @@ writeBinaryLog (Logger lh _) ts msg = do
     BS.hPut lh $ toStringBinary stamp msg
 
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
-writeLog (Logger lh _) ts msg = do
+writeLog (Logger lh lt) ts msg = do
     -- let stamp = generateTS ts
     let smsg = StampedMessage (show ts) msg
     BSL.hPut lh $ A.encode smsg
     BS.hPut lh bNewLine
+    case lt of
+        Json -> do
+            BSL.hPut lh $ A.encode smsg
+            BS.hPut lh bNewLine
+        _ -> undefined
