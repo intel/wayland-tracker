@@ -34,6 +34,7 @@ import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson as A
 import qualified Data.Time.Clock as Clock
+import qualified System.IO as IO
 
 import Types
 
@@ -102,6 +103,7 @@ writeBinaryLog :: Logger -> Clock.NominalDiffTime -> ParsedBinaryMessage -> IO (
 writeBinaryLog (Logger lh _) ts msg = do
     let stamp = generateTS ts
     BS.hPut lh $ toStringBinary stamp msg
+    IO.hFlush lh
 
 
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
@@ -114,4 +116,5 @@ writeLog (Logger lh lt) ts msg = do
         Json -> do
             BSL.hPut lh $ A.encode smsg
             BS.hPut lh bNewLine
+            IO.hFlush lh
         _ -> undefined

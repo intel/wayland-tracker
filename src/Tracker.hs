@@ -540,7 +540,7 @@ runApplication xfs lt lf cmd cmdargs = do
 
     logHandle <- if Maybe.isNothing lf
         then return IO.stdout
-        else IO.openFile (Maybe.fromJust lf) IO.ReadMode
+        else IO.openFile (Maybe.fromJust lf) IO.WriteMode
 
     beginning <- Clock.getCurrentTime
     let ts = timeSinceStart beginning
@@ -603,16 +603,21 @@ runApplication xfs lt lf cmd cmdargs = do
         case e of
             SigInt -> do
                 putStrLnErr "sigINT received"
+                IO.hClose logHandle
                 Exit.exitSuccess
             SigChld -> do
                 putStrLnErr "sigCHLD received"
+                IO.hClose logHandle
                 Exit.exitSuccess
             ServerClosedSocket -> do
                 putStrLnErr "server closed socket"
+                IO.hClose logHandle
                 Signals.signalProcess Signals.sigINT pid
                 Exit.exitFailure
             ClientClosedSocket -> do
                 putStrLnErr "client closed socket"
+                IO.hClose logHandle
                 Exit.exitSuccess
             ProcessingError -> do
+                IO.hClose logHandle
                 Exit.exitSuccess
