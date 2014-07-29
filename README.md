@@ -30,9 +30,10 @@ might print out this data (and more):
     [0.012968s   ] Event   sender=2  op=0  size=32  0b000000 0a000000 776c5f6f 75747075 74006574 02000000
     [0.012968s   ] Event   sender=2  op=0  size=36  0a000000 10000000 776c5f69 6e707574 5f6d6574 686f6400 01000000
 
-Wayland-tracker has two usage modes: `binary` and `json`. Binary mode outputs
-the wayland messages in binary format, and json mode outputs the messages in
-JSON format. More output format options are expected in the future.
+Wayland-tracker has three output modes: `binary`, `json` and `json_pretty`.
+Binary mode outputs the wayland messages in binary format, and json mode outputs
+the messages in JSON format. More output format options are expected in the
+future.
 
 The binary format log contains first the time stamp since program launch, then
 parsed Wayland message heades (sender, opcode, and message size). The message
@@ -54,38 +55,46 @@ might print out this data:
     {"message":{"name":"done","type":"Event","arguments":[{"name":"callback_data","value":{"value":2458,"type":"UInt"}}],"interface":"wl_callback"},"timestamp":"0.07244s"}
     {"message":{"name":"global","type":"Event","arguments":[{"name":"name","value":{"value":18,"type":"UInt"}},{"name":"interface","value":{"value":"screenshooter","type":"UInt"}},{"name":"version","value":{"value":1,"type":"UInt"}}],"interface":"wl_registry"},"timestamp":"0.07244s"}
 
-You will need a JSON pretty-printer to appreciate the individual JSON messages
-better:
+Output mode `json_pretty` uses a JSON pretty-printer to make JSON messages more
+human-readable:
 
     {
         "message": {
-            "name": "keymap",
-            "type": "Event",
+            "type": "Request",
+            "name": "set_window_geometry",
+            "interface": "xdg_surface",
             "arguments": [
                 {
-                    "name": "format",
+                    "name": "x",
                     "value": {
-                        "value": 1,
-                        "type": "UInt"
+                        "type": "Int",
+                        "value": 32
                     }
                 },
                 {
-                    "name": "fd",
+                    "name": "y",
                     "value": {
-                        "type": "Fd"
+                        "type": "Int",
+                        "value": 32
                     }
                 },
                 {
-                    "name": "size",
+                    "name": "width",
                     "value": {
-                        "value": 50571,
-                        "type": "UInt"
+                        "type": "Int",
+                        "value": 742
+                    }
+                },
+                {
+                    "name": "height",
+                    "value": {
+                        "type": "Int",
+                        "value": 427
                     }
                 }
-            ],
-            "interface": "wl_keyboard"
+            ]
         },
-        "timestamp": "0.07142s"
+        "timestamp": "0.157951s"
     }
 
 A good place to find the protocol XML files are the Wayland and Weston git
@@ -150,7 +159,6 @@ JSON generation uses [Aeson](https://github.com/bos/aeson).
 Future work and improvement ideas
 ---------------------------------
 
-* pretty-print JSON
 * ["pcap" output mode] (https://github.com/bos/pcap) for analysing log files with WireShark
 * "simple" output mode with human-readable output and one line messages
 * use quickcheck for testing parsing and log formats
