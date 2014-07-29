@@ -25,6 +25,7 @@ module Tracker where
 import qualified Data.Binary.Strict.BitGet as BG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Word as W
 import qualified System.IO as IO
 import qualified System.IO.Error as Err
@@ -45,6 +46,7 @@ import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
 import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
+import qualified Data.Binary as B
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Binary as AB
 import qualified Data.Time.Clock as Clock
@@ -131,7 +133,8 @@ newIdParser interface = do
 
 fixedParser :: A.Parser MArgumentValue
 fixedParser = do
-    bs <- A.take 4
+    v <- anyWord32he
+    let bs = BSL.toStrict $ B.encode v
     let values = getFixedValues bs
     case values of
         Right (sign, f, s) -> return $ MFixed sign f s
