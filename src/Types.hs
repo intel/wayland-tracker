@@ -90,7 +90,7 @@ instance A.ToJSON MArgumentValue where
     toJSON value = case value of
         MInt v -> A.object [ "type" A..= A.String "Int", "value" A..= v ]
         MUInt v -> A.object [ "type" A..= A.String "UInt", "value" A..= v ]
-        MString v -> A.object [ "type" A..= A.String "UInt", "value" A..= v ]
+        MString v -> A.object [ "type" A..= A.String "String", "value" A..= v ]
         MFixed _ _ _ -> A.object [ "type" A..= A.String "Fixed",
                                    "value" A..= fixedToFloat value ]
         MArray bs -> A.object [ "type" A..= A.String "Array",
