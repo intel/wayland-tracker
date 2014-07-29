@@ -83,8 +83,8 @@ fixedToFloat (MFixed sign fp sp) = signed sign (head values)
     where
         values = N.readFloat $ (show fp) ++ "." ++ (show sp)
         signed s (float, _) = if s
-            then float
-            else -1.0 * float
+            then -1.0 * float
+            else float
 
 instance A.ToJSON MArgumentValue where
     toJSON value = case value of

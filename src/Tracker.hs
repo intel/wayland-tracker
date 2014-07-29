@@ -135,7 +135,7 @@ fixedParser = do
     let values = getFixedValues bs
     case values of
         Right (sign, f, s) -> return $ MFixed sign f s
-        Left _ -> return $ MFixed True 0 0
+        Left _ -> return $ MFixed False 0 0
     where
         getFixedValues :: BS.ByteString -> Either String (Bool, Int, Int)
         getFixedValues w = BG.runBitGet w $ do
@@ -509,7 +509,7 @@ readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe (InterfaceMap))
 readXmlData [] mapping = return $ Just mapping
 readXmlData (xf:xfs) mapping = do
     h <- IO.openFile xf IO.ReadMode
-    -- set encoding, because Waylad XML files are UTF8
+    -- set encoding, because Wayland XML files are UTF8
     IO.hSetEncoding h IO.utf8
     d <- IO.hGetContents h
     case addMapping d mapping of
