@@ -122,4 +122,4 @@ writeLog (Logger lh lt) ts msg = do
             IO.hFlush lh
     where
         conf = AP.Config 4 ordering
-        ordering = AP.keyOrder ["type", "name", "interface", "arguments", "value", "timestamp"]
+        ordering = AP.keyOrder ["type", "name", "interface", "arguments", "value", "message", "timestamp"]
