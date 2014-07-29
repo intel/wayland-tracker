@@ -87,7 +87,7 @@ getLogType :: String -> Maybe LogType
 getLogType s = case s of
     "binary" -> Just Binary
     "json" -> Just Json
-    _ -> Nothing
+    "json_pretty" -> Just JsonPretty
 
 
 putStrLnErr :: String -> IO ()
@@ -544,7 +544,7 @@ runApplication xfs lt lf cmd cmdargs = do
     let logFormat = getLogType lt
 
     ET.when (Maybe.isNothing logFormat) $ do
-        putStrLnErr $ "unknown log format type " ++ lt ++ "; known types are binary and json"
+        putStrLnErr $ "unknown log format type " ++ lt ++ "; known types are binary, json and json_pretty"
         Exit.exitFailure
 
     logHandle <- if Maybe.isNothing lf

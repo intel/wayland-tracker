@@ -33,6 +33,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.Aeson as A
+import qualified Data.Aeson.Encode.Pretty as AP
 import qualified Data.Time.Clock as Clock
 import qualified System.IO as IO
 
@@ -110,11 +111,15 @@ writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
 writeLog (Logger lh lt) ts msg = do
     -- let stamp = generateTS ts
     let smsg = StampedMessage (show ts) msg
-    BSL.hPut lh $ A.encode smsg
-    BS.hPut lh bNewLine
     case lt of
         Json -> do
             BSL.hPut lh $ A.encode smsg
             BS.hPut lh bNewLine
             IO.hFlush lh
-        _ -> undefined
+        JsonPretty -> do
+            BSL.hPut lh $ AP.encodePretty' conf smsg
+            BS.hPut lh bNewLine
+            IO.hFlush lh
+    where
+        conf = AP.Config 4 ordering
+        ordering = AP.keyOrder ["type", "name", "interface", "arguments", "value", "timestamp"]
