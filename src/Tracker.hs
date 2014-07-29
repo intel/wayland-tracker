@@ -508,11 +508,17 @@ sigHandler sig var = do
 readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe (InterfaceMap))
 readXmlData [] mapping = return $ Just mapping
 readXmlData (xf:xfs) mapping = do
-    d <- readFile xf
-    let newMapping = addMapping d mapping
-    case newMapping of
-        Nothing -> return Nothing
-        Just m -> readXmlData xfs m
+    h <- IO.openFile xf IO.ReadMode
+    -- set encoding, because Waylad XML files are UTF8
+    IO.hSetEncoding h IO.utf8
+    d <- IO.hGetContents h
+    case addMapping d mapping of
+        Nothing -> do
+            IO.hClose h
+            return Nothing
+        Just m -> do
+            IO.hClose h
+            readXmlData xfs m
 
     where
         addMapping :: String -> InterfaceMap -> Maybe InterfaceMap
