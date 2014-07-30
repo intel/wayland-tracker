@@ -20,13 +20,13 @@ For example, command
 
     wayland-tracker json -x wayland.xml -x xdg-shell.xml -- weston-terminal
 
-might print out this data:
+might print out this data (and much more):
 
-    {"message":{"name":"sync","type":"Request","arguments":[{"name":"callback","value":{"value":3,"type":"NewId"}}],"interface":"wl_display"},"timestamp":"0.072162s"}
-    {"message":{"name":"get_registry","type":"Request","arguments":[{"name":"registry","value":{"value":2,"type":"NewId"}}],"interface":"wl_display"},"timestamp":"0.072162s"}
-    {"message":{"name":"delete_id","type":"Event","arguments":[{"name":"id","value":{"value":3,"type":"UInt"}}],"interface":"wl_display"},"timestamp":"0.07244s"}
-    {"message":{"name":"done","type":"Event","arguments":[{"name":"callback_data","value":{"value":2458,"type":"UInt"}}],"interface":"wl_callback"},"timestamp":"0.07244s"}
-    {"message":{"name":"global","type":"Event","arguments":[{"name":"name","value":{"value":18,"type":"UInt"}},{"name":"interface","value":{"value":"screenshooter","type":"UInt"}},{"name":"version","value":{"value":1,"type":"UInt"}}],"interface":"wl_registry"},"timestamp":"0.07244s"}
+    {"message":{"arguments":[{"value":{"value":3,"type":"NewId"},"name":"callback"}],"name":"sync","interface":"wl_display","type":"Request"},"timestamp":"0.112595s"}
+    {"message":{"arguments":[{"value":{"value":2,"type":"NewId"},"name":"registry"}],"name":"get_registry","interface":"wl_display","type":"Request"},"timestamp":"0.112595s"}
+    {"message":{"arguments":[{"value":{"value":3,"type":"UInt"},"name":"id"}],"name":"delete_id","interface":"wl_display","type":"Event"},"timestamp":"0.112988s"}
+    {"message":{"arguments":[{"value":{"value":5276,"type":"UInt"},"name":"callback_data"}],"name":"done","interface":"wl_callback","type":"Event"},"timestamp":"0.112988s"}
+    {"message":{"arguments":[{"value":{"value":18,"type":"UInt"},"name":"name"},{"value":{"value":"screenshooter","type":"String"},"name":"interface"},{"value":{"value":1,"type":"UInt"},"name":"version"}],"name":"global","interface":"wl_registry","type":"Event"},"timestamp":"0.112988s"}
 
 Output mode `json_pretty` uses a JSON pretty-printer to make JSON messages more
 human-readable while using exactly the same options as `json`:
@@ -113,7 +113,6 @@ The application and its command line parameters are provided after `--` in the
 command line:
 
     wayland-tracker binary -- weston-terminal --help
-
 
 Building wayland-tracker
 ------------------------
