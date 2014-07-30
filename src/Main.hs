@@ -1,31 +1,62 @@
-import qualified System.Console.CmdTheLine as Cmd
-import Control.Applicative
+{-# LANGUAGE DeriveDataTypeable #-}
 
+import System.Console.CmdArgs
+
+import Types
 import Tracker
 
-xmlFiles :: Cmd.Term [String]
-xmlFiles = Cmd.value $ Cmd.optAll [] $ Cmd.optInfo ["xml-file", "x"]
+data OutputMode = BinaryMode
+                    {
+                        output :: Maybe String,
+                        command :: String,
+                        commandArgs :: [String]
+                    }
+                 | JsonMode
+                    {
+                        xmlFile :: [String],
+                        output :: Maybe String,
+                        command :: String,
+                        commandArgs :: [String]
+                    }
+                 | JsonPrettyMode
+                    {
+                        xmlFile :: [String],
+                        output :: Maybe String,
+                        command :: String,
+                        commandArgs :: [String]
+                    }
+                        deriving (Show, Data, Typeable)
 
-logType :: Cmd.Term String
-logType = Cmd.value $ Cmd.opt "binary" $ Cmd.optInfo ["output-type", "t"]
+binaryMode = BinaryMode
+        {
+            output = def &= typFile &= help "Output file",
+            command = def &= argPos 0 &= typ "PROGRAM",
+            commandArgs = def &= args
+        } &= name "binary"
 
-logFile :: Cmd.Term (Maybe String)
-logFile = Cmd.value $ Cmd.opt Nothing $ Cmd.optInfo ["output-file", "o"]
+jsonMode = JsonMode
+        {
+            xmlFile = def &= typFile &= help "Protocol description XML file",
+            output = def &= typFile &= help "Output file",
+            command = def &= argPos 0 &= typ "PROGRAM",
+            commandArgs = def &= args
+        } &= name "json"
 
-command :: Cmd.Term String
-command = Cmd.required $ Cmd.pos 0 Nothing Cmd.posInfo { Cmd.posName = "COMMAND" }
+jsonPrettyMode = JsonPrettyMode
+        {
+            xmlFile = def &= typFile &= help "Protocol description XML file",
+            output = def &= typFile &= help "Output file",
+            command = def &= argPos 0 &= typ "PROGRAM",
+            commandArgs = def &= args &= typ "PROGRAM OPTIONS"
+        } &= name "json_pretty"
 
-commandArgs :: Cmd.Term [String]
-commandArgs = Cmd.value $ Cmd.posRight 0 [] Cmd.posInfo { Cmd.posName = "ARGS" }
-
-term :: Cmd.Term (IO ())
-term = program <$> xmlFiles <*> logType <*> logFile <*> command <*> commandArgs
-
-program :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
-program xfs lt lf cmd cmdargs = runApplication xfs lt lf cmd cmdargs
-
-termInfo :: Cmd.TermInfo
-termInfo = Cmd.defTI { Cmd.termName = "wayland-tracker", Cmd.version = "0.1" }
-
-main :: IO ()
-main = Cmd.run (term, termInfo)
+main = do
+    let m = modes [binaryMode &= auto, jsonMode, jsonPrettyMode]
+            &= program "wayland-tracker"
+            &= summary "Wayland protocol message dumper, version 0.1"
+            &= helpArg [name "h"]
+    args <- cmdArgsRun (cmdArgsMode $ m)
+    case args of
+        BinaryMode o c cargs -> runApplication [] Binary o c cargs
+        JsonMode xs o c cargs -> runApplication xs Json o c cargs
+        JsonPrettyMode xs o c cargs -> runApplication xs JsonPretty o c cargs

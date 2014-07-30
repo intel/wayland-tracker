@@ -83,13 +83,6 @@ anyWord16he =
         Endian.BigEndian -> AB.anyWord16be
 
 
-getLogType :: String -> Maybe LogType
-getLogType s = case s of
-    "binary" -> Just Binary
-    "json" -> Just Json
-    "json_pretty" -> Just JsonPretty
-
-
 putStrLnErr :: String -> IO ()
 putStrLnErr s = do
     IO.hPutStr IO.stderr s
@@ -538,14 +531,8 @@ readXmlData (xf:xfs) mapping = do
 timeSinceStart :: Clock.UTCTime -> Clock.UTCTime -> Clock.NominalDiffTime
 timeSinceStart beginning current = Clock.diffUTCTime current beginning
 
-runApplication :: [String] -> String -> Maybe String -> String -> [String] -> IO ()
+runApplication :: [String] -> LogType -> Maybe String -> String -> [String] -> IO ()
 runApplication xfs lt lf cmd cmdargs = do
-
-    let logFormat = getLogType lt
-
-    ET.when (Maybe.isNothing logFormat) $ do
-        putStrLnErr $ "unknown log format type " ++ lt ++ "; known types are binary, json and json_pretty"
-        Exit.exitFailure
 
     logHandle <- if Maybe.isNothing lf
         then return IO.stdout
@@ -589,7 +576,7 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- start threads for communication and processing
 
-    _ <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle (Maybe.fromJust logFormat)
+    _ <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle lt
 
     _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
 
