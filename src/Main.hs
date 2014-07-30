@@ -54,7 +54,7 @@ binaryMode = BinaryMode
         {
             output = def &= typFile &= help "Output file",
             command = def &= argPos 0 &= typ "PROGRAM",
-            commandArgs = def &= args
+            commandArgs = def &= args &= typ "PROGRAM OPTIONS"
         } &= name "binary"
 
 jsonMode :: OutputMode
@@ -63,7 +63,7 @@ jsonMode = JsonMode
             xmlFile = def &= typFile &= help "Protocol description XML file",
             output = def &= typFile &= help "Output file",
             command = def &= argPos 0 &= typ "PROGRAM",
-            commandArgs = def &= args
+            commandArgs = def &= args &= typ "PROGRAM OPTIONS"
         } &= name "json"
 
 jsonPrettyMode :: OutputMode
