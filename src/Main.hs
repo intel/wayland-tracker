@@ -81,7 +81,7 @@ main = do
             &= program "wayland-tracker"
             &= summary "Wayland protocol message dumper, version 0.1"
             &= helpArg [name "h"]
-    parsedArgs <- cmdArgsRun (cmdArgsMode m)
+    parsedArgs <- cmdArgs m
     case parsedArgs of
         BinaryMode o c cargs -> runApplication [] Binary o c cargs
         JsonMode xs o c cargs -> runApplication xs Json o c cargs
