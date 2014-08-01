@@ -22,7 +22,9 @@ OF THIS SOFTWARE.
 
 module Tracker where
 
-import qualified Data.Binary.Strict.BitGet as BG
+import qualified Data.Binary as B
+import qualified Data.Binary.Get as BG
+import qualified Data.Binary.Bits.Get as BBG
 import qualified Control.Monad as M
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -46,11 +48,12 @@ import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
 import qualified Data.ByteString.UTF8 as U
 import qualified Data.List as List
-import qualified Data.Binary as B
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Binary as AB
 import qualified Data.Time.Clock as Clock
 import qualified System.Endian as Endian
+
+-- import Debug.Trace
 
 import Types
 import Log
@@ -127,17 +130,20 @@ newIdParser interface = do
 fixedParser :: A.Parser MArgumentValue
 fixedParser = do
     v <- anyWord32he
-    let bs = BSL.toStrict $ B.encode v
-    let values = getFixedValues bs
-    case values of
-        Right (sign, f, s) -> return $ MFixed sign f s
-        Left _ -> return $ MFixed False 0 0
+    let bs = B.encode v
+    let (sign, f, s) = getFixedValues bs
+    return $ MFixed sign f s
     where
-        getFixedValues :: BS.ByteString -> Either String (Bool, Int, Int)
-        getFixedValues w = BG.runBitGet w $ do
-            sign <- BG.getBit
-            f <- BG.getAsWord32 23
-            s <- BG.getAsWord8 8
+        getFixedValues :: BSL.ByteString -> (Bool, Int, Int)
+        getFixedValues = BG.runGet $ do
+            (a, b, c) <- BBG.runBitGet parseFixed
+            return (a,b,c)
+
+        parseFixed :: BBG.BitGet (Bool, Int, Int)
+        parseFixed = do
+            sign <- BBG.getBool
+            f <- BBG.getWord32be 23
+            s <- BBG.getWord8 8
             return (sign, fromIntegral f, fromIntegral s)
 
 
@@ -208,6 +214,7 @@ messageParser om _ t = do
             Just messageDescription -> do
                 let messageName = msgDescrName messageDescription
                 let interfaceName = interfaceDescrName interfaceDescription
+                -- trace (show (interfaceName, messageName)) return ()
                 args <- messageDataParser messageDescription
                 return $ Message t messageName interfaceName args
             Nothing -> do
