@@ -154,10 +154,13 @@ stringParser = do
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
         else dataLen + (4 - (rem dataLen 4))
-    str <- A.take (dataLen - 1)
-    A.take 1 -- the terminating NUL byte
-    A.take $ paddedLen - dataLen
-    return $ MString $ U.toString str
+    if dataLen == 0
+        then return $ MString ""
+        else do
+            str <- A.take (dataLen - 1)
+            A.take 1 -- the terminating NUL byte
+            A.take $ paddedLen - dataLen
+            return $ MString $ U.toString str
 
 
 arrayParser :: A.Parser MArgumentValue
