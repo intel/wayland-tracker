@@ -154,8 +154,8 @@ stringParser = do
     let paddedLen = if (rem dataLen 4) == 0
         then dataLen
         else dataLen + (4 - (rem dataLen 4))
-    if dataLen == 0
-        then return $ MString ""
+    if dataLen == 0 -- this is a null string, it's not even an empty string
+        then return $ MString "(null)" -- TÓDO: better representation?
         else do
             str <- A.take (dataLen - 1)
             A.take 1 -- the terminating NUL byte
