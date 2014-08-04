@@ -49,6 +49,7 @@ data OutputMode = BinaryMode {
                     commandArgs :: [String]
                 } deriving (Show, Data, Typeable)
 
+
 binaryMode :: Annotate Ann
 binaryMode = record BinaryMode { output = Nothing, command = "", commandArgs = [] }
         [
@@ -56,6 +57,7 @@ binaryMode = record BinaryMode { output = Nothing, command = "", commandArgs = [
             command := def += argPos 0 += typ "PROGRAM",
             commandArgs := def += args += typ "PROGRAM OPTIONS"
         ] += name "binary"
+
 
 jsonMode :: Annotate Ann
 jsonMode = record JsonMode { xmlFile = [], output = Nothing, command = "", commandArgs = [] }
@@ -66,6 +68,7 @@ jsonMode = record JsonMode { xmlFile = [], output = Nothing, command = "", comma
             commandArgs := def += args += typ "PROGRAM OPTIONS"
         ] += name "json"
 
+
 jsonPrettyMode :: Annotate Ann
 jsonPrettyMode = record JsonPrettyMode { xmlFile = [], output = Nothing, command = "", commandArgs = [] }
         [
@@ -74,6 +77,7 @@ jsonPrettyMode = record JsonPrettyMode { xmlFile = [], output = Nothing, command
             command := def += argPos 0 += typ "PROGRAM",
             commandArgs := def += args += typ "PROGRAM OPTIONS"
         ] += name "json_pretty"
+
 
 main :: IO ()
 main = do

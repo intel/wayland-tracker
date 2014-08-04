@@ -81,10 +81,11 @@ data Logger = Logger IO.Handle LogType
 fixedToFloat :: MArgumentValue -> Double
 fixedToFloat (MFixed sign fp sp) = signed sign (head values)
     where
-        values = N.readFloat $ (show fp) ++ "." ++ (show sp)
+        values = N.readFloat $ show fp ++ "." ++ show sp
         signed s (float, _) = if s
             then -1.0 * float
             else float
+
 
 instance A.ToJSON MArgumentValue where
     toJSON value = case value of
@@ -94,7 +95,7 @@ instance A.ToJSON MArgumentValue where
         MFixed _ _ _ -> A.object [ "type" A..= A.String "Fixed",
                                    "value" A..= fixedToFloat value ]
         MArray bs -> A.object [ "type" A..= A.String "Array",
-                                "value" A..= (C8.unpack $ B16.encode bs) ]
+                                "value" A..= C8.unpack (B16.encode bs) ]
         MFd -> A.object [ "type" A..= A.String "Fd" ]
         MNewId v _ -> A.object [ "type" A..= A.String "NewId", "value" A..= v ]
         MObject v -> A.object [ "type" A..= A.String "Object", "value" A..= v ]

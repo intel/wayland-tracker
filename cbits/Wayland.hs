@@ -30,8 +30,6 @@ import Foreign
 import Foreign.C.Types
 import qualified Data.ByteString as BS
 import qualified Network.Socket as Socket
----- import qualified Data.ByteString.Unsafe as UBS
--- import qualified Data.ByteString.Char8 as BSC
 import qualified Control.Concurrent as CC
 
 foreign import ccall unsafe "wayland-msg-handling.h sendmsg_wayland"
@@ -40,7 +38,7 @@ foreign import ccall unsafe "wayland-msg-handling.h sendmsg_wayland"
         -> CInt -- bufsize
         -> Ptr CInt -- fds
         -> CInt -- n_fds
-        -> IO (Int) -- bytes sent
+        -> IO Int -- bytes sent
 
 foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
     c_recvmsg_wayland :: CInt -- fd
@@ -49,7 +47,8 @@ foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
         -> Ptr CInt -- fds
         -> CInt -- fdbufsize
         -> Ptr CInt -- n_fds
-        -> IO (Int) -- bytes received
+        -> IO Int -- bytes received
+
 
 sendToWayland :: Socket.Socket -> BS.ByteString -> [Int] -> IO Int
 sendToWayland s bs fds = do
@@ -66,6 +65,7 @@ sendToWayland s bs fds = do
                 then ioError $ userError "sendmsg failed"
                 else return len
 
+
 recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
 recvFromWayland s = allocaArray 4096 $ \cbuf -> do
     CC.threadWaitRead $ fromIntegral socket
@@ -78,6 +78,6 @@ recvFromWayland s = allocaArray 4096 $ \cbuf -> do
                     bs <- BS.packCStringLen (cbuf, len)
                     nFds <- peek nFds_ptr
                     fds <- peekArray (fromIntegral nFds) fdArray
-                    return (bs, (map fromIntegral fds))
+                    return (bs, map fromIntegral fds)
     where
         socket = Socket.fdSocket s

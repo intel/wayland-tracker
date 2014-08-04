@@ -88,7 +88,7 @@ anyWord16he =
 
 putStrLnErr :: String -> IO ()
 putStrLnErr s = do
-    IO.hPutStr IO.stderr s
+    IO.hPutStr IO.stderr ("wayland-tracker: " ++ s)
     IO.hPutStr IO.stderr "\n"
 
 
@@ -147,19 +147,22 @@ fixedParser = do
             return (sign, fromIntegral f, fromIntegral s)
 
 
+paddedLength :: Int -> Int
+paddedLength len = if rem len 4 == 0
+    then len
+    else len + 4 - rem len 4
+
+
 stringParser :: A.Parser MArgumentValue
 stringParser = do
     lenW <- anyWord32he
     let dataLen = fromIntegral lenW
-    let paddedLen = if (rem dataLen 4) == 0
-        then dataLen
-        else dataLen + (4 - (rem dataLen 4))
     if dataLen == 0 -- this is a null string, it's not even an empty string
-        then return $ MString "(null)" -- TÓDO: better representation?
+        then return $ MString "(null)" -- TODO: better representation?
         else do
             str <- A.take (dataLen - 1)
             A.take 1 -- the terminating NUL byte
-            A.take $ paddedLen - dataLen
+            A.take $ (paddedLength dataLen) - dataLen -- read padded bytes
             return $ MString $ U.toString str
 
 
@@ -167,12 +170,9 @@ arrayParser :: A.Parser MArgumentValue
 arrayParser = do
     lenW <- anyWord32he
     let dataLen = fromIntegral lenW
-    let paddedLen = if (rem dataLen 4) == 0
-        then dataLen
-        else dataLen + (4 - (rem dataLen 4))
     arr <- A.take dataLen
-    A.take $ paddedLen - dataLen
-    return $ MArray $ arr
+    A.take $ (paddedLength dataLen) - dataLen
+    return $ MArray arr
 
 
 fdParser :: A.Parser MArgumentValue
@@ -188,7 +188,7 @@ messageDataParser (WMessageDescription _ msgArgs) = do
     where
         messageBlockParser :: [WArgumentDescription] -> [A.Parser MArgumentValue] -> [A.Parser MArgumentValue]
         messageBlockParser [] parsers = parsers
-        messageBlockParser (arg:args) parsers = messageBlockParser args ((selectParser arg):parsers)
+        messageBlockParser (arg:args) parsers = messageBlockParser args (selectParser arg:parsers)
             where
                 selectParser :: WArgumentDescription -> A.Parser MArgumentValue
                 selectParser a = case argDescrType a of
@@ -196,7 +196,7 @@ messageDataParser (WMessageDescription _ msgArgs) = do
                     WUInt -> uintParser
                     WFd -> fdParser
                     WObject -> objectParser
-                    WNewId -> (newIdParser $ argDescrInterface a)
+                    WNewId -> newIdParser $ argDescrInterface a
                     WString -> stringParser
                     WArray -> arrayParser
                     WFixed -> fixedParser
@@ -259,15 +259,9 @@ updateMap im msg om =
     case msg of
         Message _ name _ _ ->
             case name of
-                "bind" -> case processBind om msg of
-                    Just newOm -> newOm
-                    Nothing -> om
-                "delete_id" -> case processDeleteId om msg of
-                    Just newOm -> newOm
-                    Nothing -> om
-                _ -> case processCreateObject om msg of
-                    Just newOm -> newOm
-                    Nothing -> om
+                "bind" -> Maybe.fromMaybe om (processBind om msg)
+                "delete_id" -> Maybe.fromMaybe om (processDeleteId om msg)
+                _ -> Maybe.fromMaybe om (processCreateObject om msg)
         UnknownMessage -> om
     where
         processBind oldOm (Message _ _ _ args) = do
@@ -292,8 +286,7 @@ updateMap im msg om =
         processDeleteId oldOm (Message _ _ _ args) = do
             deletedId <- List.find (\a -> argName a == "id") args
             case argValue deletedId of
-                MUInt v -> do
-                    Just $ IM.delete v oldOm
+                MUInt v -> Just $ IM.delete v oldOm
                 _ -> Nothing
 
 
@@ -320,7 +313,7 @@ parseData t om im bs msgs =
             let newOm = updateMap im msg om
             in
                 if BS.null i
-                    then Right ((msg:msgs), newOm)
+                    then Right (msg:msgs, newOm)
                     else parseData t newOm im i (msg:msgs)
 
 
@@ -395,24 +388,20 @@ processingThread eventV ts xfs chan lh lt = do
 
 
 rwloop :: MessageType -> Socket.Socket -> Socket.Socket ->
-        STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+        STM.TChan (MessageType, BS.ByteString, [Int]) -> IO Event
 rwloop t inputSock outputSock logger =  do
 
-    let direction = if t == Request
-        then "client"
-        else "server"
+    (bs, fds) <- Err.catchIOError (recvFromWayland inputSock) (\_ -> return (BS.empty, []))
 
-    (bs, fds) <- recvFromWayland inputSock
-
-    ET.when (BS.null bs) $ ET.throwError $ ET.strMsg $ "input socket for " ++ direction ++ " was closed"
-
-    sent <- sendToWayland outputSock bs fds
-
-    ET.when (sent == 0) $ ET.throwError $ ET.strMsg $ "output socket for " ++ direction ++ " was closed"
-
-    STM.atomically $ STM.writeTChan logger (t, bs, fds)
-
-    rwloop t inputSock outputSock logger
+    if BS.null bs
+        then if t == Request then return ClientClosedSocket else return ServerClosedSocket
+        else do
+            sent <- Err.catchIOError (sendToWayland outputSock bs fds) (\_ -> return 0)
+            if sent == 0
+                then if t == Event then return ClientClosedSocket else return ServerClosedSocket
+                else do
+                    STM.atomically $ STM.writeTChan logger (t, bs, fds)
+                    rwloop t inputSock outputSock logger
 
 
 {-
@@ -423,9 +412,7 @@ an accurate description of the message content on the wire.
 
 isTypelessObject :: WMessageDescription -> Bool
 isTypelessObject (WMessageDescription _ args) = any typeless args
-    where typeless (WArgumentDescription _ t i) = if t == WNewId && i == ""
-            then True
-            else False
+    where typeless (WArgumentDescription _ t i) = t == WNewId && i == ""
 
 
 fixMessage :: WMessageDescription -> WMessageDescription
@@ -451,15 +438,15 @@ fixInterface (WInterfaceDescription n rs es) =
 clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
                 STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 clientThread eventV clientSock serverSock loggerChan = do
-    rwloop Request clientSock serverSock loggerChan
-    STM.atomically $ STM.putTMVar eventV ClientClosedSocket
+    event <- rwloop Request clientSock serverSock loggerChan
+    STM.atomically $ STM.putTMVar eventV event
 
 
 serverThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
                 STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
 serverThread eventV serverSock clientSock loggerChan = do
-    rwloop Event serverSock clientSock loggerChan
-    STM.atomically $ STM.putTMVar eventV ServerClosedSocket
+    event <- rwloop Event serverSock clientSock loggerChan
+    STM.atomically $ STM.putTMVar eventV event
 
 
 -- ioThread reads input from child and outputs it to stderr
@@ -511,7 +498,7 @@ sigHandler sig var = do
     STM.atomically $ STM.putTMVar var e
 
 
-readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe (InterfaceMap))
+readXmlData :: [FilePath] -> InterfaceMap -> IO (Maybe InterfaceMap)
 readXmlData [] mapping = return $ Just mapping
 readXmlData (xf:xfs) mapping = do
     h <- IO.openFile xf IO.ReadMode
@@ -531,7 +518,7 @@ readXmlData (xf:xfs) mapping = do
         addMapping d imap = do
             is <- parseWaylandXML d
             let fixedIs = map fixInterface is
-            let m = foldr (\i -> DM.insert (interfaceDescrName i) i) (DM.empty) fixedIs
+            let m = foldr (\i -> DM.insert (interfaceDescrName i) i) DM.empty fixedIs
             let exists = not $ DM.null $ DM.intersection m imap
             if exists
                 then Nothing
@@ -540,6 +527,7 @@ readXmlData (xf:xfs) mapping = do
 
 timeSinceStart :: Clock.UTCTime -> Clock.UTCTime -> Clock.NominalDiffTime
 timeSinceStart beginning current = Clock.diffUTCTime current beginning
+
 
 runApplication :: [String] -> LogType -> Maybe String -> String -> [String] -> IO ()
 runApplication xfs lt lf cmd cmdargs = do
@@ -570,7 +558,7 @@ runApplication xfs lt lf cmd cmdargs = do
 
     let serverPath = xdgDir ++ "/" ++ serverName
 
-    putStrLnErr $ "Connecting to " ++ serverPath
+    putStrLnErr $ "connecting to " ++ serverPath
 
     Socket.connect serverSock (Socket.SockAddrUnix serverPath)
 
