@@ -4,6 +4,17 @@ WAYLAND-TRACKER
 Wayland-tracker is a Wayland message protocol dumper, licensed with the Wayland
 MIT license.
 
+*Question:* Why use this instead of just setting WAYLAND_DEBUG environment
+variable for the application?
+
+*Answer:* Having message tracking outside Wayland library helps debug
+difficult-to-catch problems. The wayland-tracker tool does not depend on
+application implementation or Wayland library, and it potentially gives more
+information about the messages such as the names of the message arguments. Also,
+being able to output the messages in JSON format means that you can feed the
+results to an external tool that, for instance, counts how many messages needed
+to be sent for some application use case or finds warning messages.
+
 Using wayland-tracker
 ---------------------
 
@@ -158,9 +169,11 @@ JSON generation uses [Aeson](https://github.com/bos/aeson).
 Future work and improvement ideas
 ---------------------------------
 
-* ["pcap" output mode] (https://github.com/bos/pcap) for analysing log files with WireShark
+* ["pcap" output mode](https://github.com/bos/pcap) for analysing log files with WireShark
 * "simple" output mode with human-readable output and one line messages
 * use quickcheck for testing parsing and log formats
-* handle message parsing and log output in separate OS thread?
-* use hashmap instead of trees in static maps (such as interfaces)
+* profiling and performance improvements
+  * handle message parsing and log output in separate OS thread?
+  * use hashmap instead of trees in static maps (such as interfaces)?
+  * bytestrings everywhere?
 
