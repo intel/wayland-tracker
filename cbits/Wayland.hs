@@ -38,7 +38,7 @@ foreign import ccall unsafe "wayland-msg-handling.h sendmsg_wayland"
         -> CInt -- bufsize
         -> Ptr CInt -- fds
         -> CInt -- n_fds
-        -> IO Int -- bytes sent
+        -> IO CInt -- bytes sent
 
 foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
     c_recvmsg_wayland :: CInt -- fd
@@ -47,7 +47,7 @@ foreign import ccall unsafe "wayland-msg-handling.h recvmsg_wayland"
         -> Ptr CInt -- fds
         -> CInt -- fdbufsize
         -> Ptr CInt -- n_fds
-        -> IO Int -- bytes received
+        -> IO CInt -- bytes received
 
 
 sendToWayland :: Socket.Socket -> BS.ByteString -> [Int] -> IO Int
@@ -63,7 +63,7 @@ sendToWayland s bs fds = do
             len <- c_sendmsg_wayland socket bytePtr c_byteLen fdArray c_fdLen
             if len < 0
                 then ioError $ userError "sendmsg failed"
-                else return len
+                else return $ fromIntegral len
 
 
 recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
@@ -75,7 +75,7 @@ recvFromWayland s = allocaArray 4096 $ \cbuf -> do
             if len < 0
                 then ioError $ userError "recvmsg failed"
                 else do
-                    bs <- BS.packCStringLen (cbuf, len)
+                    bs <- BS.packCStringLen (cbuf, fromIntegral len)
                     nFds <- peek nFds_ptr
                     fds <- peekArray (fromIntegral nFds) fdArray
                     return (bs, map fromIntegral fds)
