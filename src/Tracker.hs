@@ -56,7 +56,7 @@ import Log
 import ParseWaylandXML
 import Wayland
 
-data Event = ServerClosedSocket | ClientClosedSocket | ProcessingError | SigChld | SigInt
+data Event = ServerClosedSocket | ClientClosedSocket | ProcessingEnded | SigChld | SigInt
     deriving (Show, Eq)
 
 -- mapping of interface names to interfaces
@@ -314,7 +314,7 @@ parseData t om im bs msgs =
 
 processingThread :: STM.TMVar Event ->
                     (Clock.UTCTime -> Clock.NominalDiffTime) -> [String] ->
-                    STM.TChan (MessageType, BS.ByteString, [Int]) ->
+                    STM.TChan (Maybe (MessageType, BS.ByteString, [Int])) ->
                     IO.Handle -> LogType -> IO ()
 processingThread eventV ts xfs chan lh lt = do
 
@@ -332,9 +332,10 @@ processingThread eventV ts xfs chan lh lt = do
                     processData chan objectMap im
 
     -- send an error message to the channel if we end here: it means
-    -- that something has gone wrong with the XML files.
+    -- that something has gone wrong with the XML files or that the main
+    -- program has asked us to quit.
 
-    STM.atomically $ STM.putTMVar eventV ProcessingError
+    STM.atomically $ STM.putTMVar eventV ProcessingEnded
 
     where
         getXmlData xmlData = do
@@ -345,45 +346,51 @@ processingThread eventV ts xfs chan lh lt = do
         logger = Logger lh lt
 
         processBinaryData input = do
-            (t, bs, _) <- STM.atomically $ STM.readTChan input
+            v <- STM.atomically $ STM.readTChan input
 
-            -- Everything read in one go will have the same timestamp
-            currentTime <- Clock.getCurrentTime
-            let timeStamp = ts currentTime
+            case v of
+                Nothing -> return () -- time to end this thread
+                Just (t, bs, _) -> do
 
-            let r = parseBinaryData t bs []
-            case r of
-                Right msgs -> do
-                    mapM_ (writeBinaryLog logger timeStamp) msgs
-                    processBinaryData chan
-                Left str -> do
-                    putStrLnErr str
-                    processBinaryData chan
+                    -- Everything read in one go will have the same timestamp
+                    currentTime <- Clock.getCurrentTime
+                    let timeStamp = ts currentTime
+
+                    let r = parseBinaryData t bs []
+                    case r of
+                        Right msgs -> do
+                            mapM_ (writeBinaryLog logger timeStamp) msgs
+                            processBinaryData chan
+                        Left str -> do
+                            putStrLnErr str
+                            processBinaryData chan
 
         processData input objectMap im = do
-            (t, bs, _) <- STM.atomically $ STM.readTChan input
+            v <- STM.atomically $ STM.readTChan input
 
-            currentTime <- Clock.getCurrentTime
-            let timeStamp = ts currentTime
+            case v of
+                Nothing -> return () -- time to end this thread
+                Just (t, bs, _) -> do
 
-            -- Logging file descriptors doesn't make much sense, because the
-            -- fd numbers will anyway change when they are passed over the
-            -- socket.
+                    currentTime <- Clock.getCurrentTime
+                    let timeStamp = ts currentTime
 
-            let r = parseData t objectMap im bs []
-            case r of
-                Right (msgs, newObjectMap) -> do
-                    -- writeToLog msgs bs
-                    -- putStrLn $ "parsed " ++ (show $ length msgs) ++ " messages"
-                    mapM_ (writeLog logger timeStamp) msgs
-                    processData chan newObjectMap im
-                Left str -> do
-                    putStrLnErr str
-                    processData chan objectMap im
+                    -- Logging file descriptors doesn't make much sense, because
+                    -- the fd numbers will anyway change when they are passed
+                    -- over the socket.
+
+                    let r = parseData t objectMap im bs []
+                    case r of
+                        Right (msgs, newObjectMap) -> do
+                            mapM_ (writeLog logger timeStamp) msgs
+                            processData chan newObjectMap im
+                        Left str -> do
+                            putStrLnErr str
+                            processData chan objectMap im
 
 
 rwloop :: MessageType -> Socket.Socket -> Socket.Socket ->
-        STM.TChan (MessageType, BS.ByteString, [Int]) -> IO Event
+        STM.TChan (Maybe (MessageType, BS.ByteString, [Int])) -> IO Event
 rwloop t inputSock outputSock logger =  do
 
     (bs, fds) <- Err.catchIOError (recvFromWayland inputSock) (\_ -> return (BS.empty, []))
@@ -395,7 +402,7 @@ rwloop t inputSock outputSock logger =  do
             if sent == 0
                 then if t == Event then return ClientClosedSocket else return ServerClosedSocket
                 else do
-                    STM.atomically $ STM.writeTChan logger (t, bs, fds)
+                    STM.atomically $ STM.writeTChan logger $ Just (t, bs, fds)
                     rwloop t inputSock outputSock logger
 
 
@@ -431,14 +438,14 @@ fixInterface (WInterfaceDescription n rs es) =
 
 
 clientThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
-                STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+                STM.TChan (Maybe (MessageType, BS.ByteString, [Int])) -> IO ()
 clientThread eventV clientSock serverSock loggerChan = do
     event <- rwloop Request clientSock serverSock loggerChan
     STM.atomically $ STM.putTMVar eventV event
 
 
 serverThread :: STM.TMVar Event -> Socket.Socket -> Socket.Socket ->
-                STM.TChan (MessageType, BS.ByteString, [Int]) -> IO ()
+                STM.TChan (Maybe (MessageType, BS.ByteString, [Int])) -> IO ()
 serverThread eventV serverSock clientSock loggerChan = do
     event <- rwloop Event serverSock clientSock loggerChan
     STM.atomically $ STM.putTMVar eventV event
@@ -585,36 +592,33 @@ runApplication xfs lt lf cmd cmdargs = do
 
     M.forever $ do
         e <- STM.atomically $ STM.takeTMVar eventV
-{-
-        -- TODO: end gracefully so that no messages are missed from the log
 
-        CC.killThread pt
-        CC.killThread st
-        CC.killThread ct
-        CC.killThread rt
-
-        Socket.close clientSock
-        Socket.close serverSock
-
--}
         case e of
             SigInt -> do
                 putStrLnErr "sigINT received"
-                IO.hClose logHandle
-                Exit.exitSuccess
+                -- wait until the logger thread finishes
+                STM.atomically $ STM.writeTChan loggerChan Nothing
             SigChld -> do
                 putStrLnErr "sigCHLD received"
-                IO.hClose logHandle
-                Exit.exitSuccess
+                STM.atomically $ STM.writeTChan loggerChan Nothing
             ServerClosedSocket -> do
                 putStrLnErr "server closed socket"
-                IO.hClose logHandle
                 Signals.signalProcess Signals.sigINT pid
-                Exit.exitFailure
+                STM.atomically $ STM.writeTChan loggerChan Nothing
             ClientClosedSocket -> do
                 putStrLnErr "client closed socket"
+                STM.atomically $ STM.writeTChan loggerChan Nothing
+            ProcessingEnded -> do
+                putStrLnErr "exiting"
+
                 IO.hClose logHandle
-                Exit.exitSuccess
-            ProcessingError -> do
-                IO.hClose logHandle
+                CC.killThread pt
+                CC.killThread st
+                CC.killThread ct
+                CC.killThread rt
+
+                Socket.close clientSock
+                Socket.close serverSock
+
+                -- finally exit when the logger thread is done
                 Exit.exitSuccess
