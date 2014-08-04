@@ -41,8 +41,6 @@ import qualified System.Posix.Types as PT
 import qualified Network.Socket as Socket
 import qualified Control.Concurrent as CC
 import qualified Control.Concurrent.STM as STM
-import qualified Control.Monad.Error as ET
--- import qualified Numeric as N
 import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as DM
 import qualified Data.IntMap as IM
@@ -52,8 +50,6 @@ import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Binary as AB
 import qualified Data.Time.Clock as Clock
 import qualified System.Endian as Endian
-
--- import Debug.Trace
 
 import Types
 import Log
@@ -217,7 +213,6 @@ messageParser om _ t = do
             Just messageDescription -> do
                 let messageName = msgDescrName messageDescription
                 let interfaceName = interfaceDescrName interfaceDescription
-                -- trace (show (interfaceName, messageName)) return ()
                 args <- messageDataParser messageDescription
                 return $ Message t messageName interfaceName args
             Nothing -> do
@@ -574,13 +569,10 @@ runApplication xfs lt lf cmd cmdargs = do
 
     -- start threads for communication and processing
 
-    _ <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle lt
-
-    _ <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
-
-    _ <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
-
-    _ <- CC.forkIO $ ioThread ourReadFd
+    pt <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle lt
+    st <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
+    ct <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
+    rt <- CC.forkIO $ ioThread ourReadFd
 
     -- fork the child
 
@@ -593,7 +585,18 @@ runApplication xfs lt lf cmd cmdargs = do
 
     M.forever $ do
         e <- STM.atomically $ STM.takeTMVar eventV
+{-
+        -- TODO: end gracefully so that no messages are missed from the log
 
+        CC.killThread pt
+        CC.killThread st
+        CC.killThread ct
+        CC.killThread rt
+
+        Socket.close clientSock
+        Socket.close serverSock
+
+-}
         case e of
             SigInt -> do
                 putStrLnErr "sigINT received"
