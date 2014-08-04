@@ -136,7 +136,7 @@ Fedora 20, you would say:
 
 In Ubuntu 14.04 a similar command would be:
 
-    sudo yum install cabal-install ghc build-essentials
+    sudo apt-get install cabal-install ghc build-essentials
 
 Then, in the source repository update the cabal package database:
 
