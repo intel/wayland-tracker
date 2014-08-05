@@ -169,11 +169,7 @@ JSON generation uses [Aeson](https://github.com/bos/aeson).
 Future work and improvement ideas
 ---------------------------------
 
-* ["pcap" output mode](https://github.com/bos/pcap) for analysing log files with WireShark
+* "pcap" output mode (maybe using text2pcap tool?)
 * "simple" output mode with human-readable output and one line messages
 * use quickcheck for testing parsing and log formats
-* profiling and performance improvements
-  * handle message parsing and log output in separate OS thread?
-  * use hashmap instead of trees in static maps (such as interfaces)?
-  * bytestrings everywhere?
 
