@@ -4,7 +4,7 @@
 name:                wayland-tracker
 version:             0.1.0.0
 synopsis:            Message dumper for Wayland protocol.
--- description:
+description:         Message dumper for Wayland protocol.
 license:             MIT
 license-file:        LICENSE
 author:              Ismo Puustinen
