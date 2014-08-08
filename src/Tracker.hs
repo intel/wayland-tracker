@@ -460,36 +460,49 @@ serverThread eventV serverSock clientSock loggerChan = do
     STM.atomically $ STM.putTMVar eventV event
 
 
--- ioThread reads input from child and outputs it to stderr
-ioThread :: PT.Fd -> IO ()
-ioThread fd = M.forever loop
+passThread :: PT.Fd -> PT.Fd -> IO ()
+passThread input output = do
+    hInput <- PI.fdToHandle input
+    hOutput <- PI.fdToHandle output
+    IO.hSetBuffering hInput IO.NoBuffering
+    IO.hSetBuffering hOutput IO.NoBuffering
+    IO.hSetBinaryMode hInput True
+    IO.hSetBinaryMode hOutput True
+    loop hInput hOutput
     where
-        loop = do
-            CC.threadWaitRead $ fromIntegral fd
-            (str, _) <- PI.fdRead fd 4096
-            IO.hPutStr IO.stderr str
+        loop i o = do
+            closed <- IO.hIsClosed i
+            if closed
+                then do
+                    -- close also the output fd
+                    IO.hClose o
+                else do
+                    str <- IO.hGetContents i
+                    IO.hPutStr o str
+                    IO.hFlush o
+                    loop i o
 
 
-execProcess :: FilePath -> [String] -> Socket.Socket -> PT.Fd -> IO a
-execProcess path args sock fd = do
+execProcess :: FilePath -> [String] -> Socket.Socket -> PT.Fd -> PT.Fd -> IO a
+execProcess path args sock writeFd readFd = do
     let wFd = show $ Socket.fdSocket sock
 
     env <- E.getEnvironment
     let filteredEnv = filter (\x -> fst x /= "WAYLAND_SOCKET") env
 
-    -- channel client stdout, stderr to this process' stderr
+    -- channel child's stdout, stderr to local stderr and local stdin to
+    -- child's stdin
 
-    -- TODO: we need to handle stdin also, but in a separate thread
-
-    -- IO.hClose IO.stdin
+    IO.hClose IO.stdin
     IO.hClose IO.stdout
     IO.hClose IO.stderr
 
-    -- PI.dupTo fd PI.stdInput
-    PI.dupTo fd PI.stdOutput
-    PI.dupTo fd PI.stdError
+    PI.dupTo readFd PI.stdInput
+    PI.dupTo writeFd PI.stdOutput
+    PI.dupTo writeFd PI.stdError
 
-    PI.closeFd fd
+    PI.closeFd writeFd
+    PI.closeFd readFd
 
     -- putStrLnErr $ "Exec " ++ path ++ " with WAYLAND_SOCKET=" ++ fd
     Process.executeFile path True args (Just $ ("WAYLAND_SOCKET", wFd):filteredEnv)
@@ -573,9 +586,13 @@ runApplication xfs lt lf cmd cmdargs = do
 
     Socket.connect serverSock (Socket.SockAddrUnix serverPath)
 
-    -- create stdin/stdout/stderr socket pair for the child
+    -- create stdout/stderr pipe for the child
     (ourReadFd, childWriteFd) <- PI.createPipe
     PI.setFdOption ourReadFd PI.CloseOnExec True
+
+    -- stdin pipe
+    (childReadFd, ourWriteFd) <- PI.createPipe
+    PI.setFdOption ourWriteFd PI.CloseOnExec True
 
     -- create wayland socket for the child and start a thread for it
 
@@ -588,11 +605,12 @@ runApplication xfs lt lf cmd cmdargs = do
     pt <- CC.forkIO $ processingThread eventV ts xfs loggerChan logHandle lt
     st <- CC.forkIO $ serverThread eventV serverSock clientSock loggerChan
     ct <- CC.forkIO $ clientThread eventV clientSock serverSock loggerChan
-    rt <- CC.forkIO $ ioThread ourReadFd
+    rt <- CC.forkIO $ passThread ourReadFd PI.stdError
+    wt <- CC.forkIO $ passThread PI.stdInput ourWriteFd
 
     -- fork the child
 
-    pid <- Process.forkProcess $ execProcess cmd cmdargs trackerSock childWriteFd
+    pid <- Process.forkProcess $ execProcess cmd cmdargs trackerSock childWriteFd childReadFd
 
     Socket.close trackerSock
 
