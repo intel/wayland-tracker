@@ -214,7 +214,7 @@ messageParser om _ t = do
                 let messageName = msgDescrName messageDescription
                 let interfaceName = interfaceDescrName interfaceDescription
                 args <- messageDataParser messageDescription
-                return $ Message t messageName interfaceName args
+                return $ Message t messageName interfaceName sId args
             Nothing -> do
                 A.take (size - 8)
                 return UnknownMessage
@@ -252,14 +252,14 @@ isNewId _ = False
 updateMap :: InterfaceMap -> ParsedMessage -> ObjectMap -> ObjectMap
 updateMap im msg om =
     case msg of
-        Message _ name _ _ ->
+        Message _ name _ _ _ ->
             case name of
                 "bind" -> Maybe.fromMaybe om (processBind om msg)
                 "delete_id" -> Maybe.fromMaybe om (processDeleteId om msg)
                 _ -> Maybe.fromMaybe om (processCreateObject om msg)
         UnknownMessage -> om
     where
-        processBind oldOm (Message _ _ _ args) = do
+        processBind oldOm (Message _ _ _ _ args) = do
             iface <- List.find (\a -> argName a == "interface") args
             newId <- List.find (\a -> argName a == "id") args
             case argValue iface of
@@ -270,7 +270,7 @@ updateMap im msg om =
                         _ -> Nothing
                 _ -> Nothing
 
-        processCreateObject oldOm (Message _ _ _ args) = do
+        processCreateObject oldOm (Message _ _ _ _ args) = do
             newId <- List.find isNewId args
             case argValue newId of
                 MNewId niv interface -> do
@@ -278,7 +278,7 @@ updateMap im msg om =
                     Just $ IM.insert niv interfaceDescr oldOm
                 _ -> Nothing
 
-        processDeleteId oldOm (Message _ _ _ args) = do
+        processDeleteId oldOm (Message _ _ _ _ args) = do
             deletedId <- List.find (\a -> argName a == "id") args
             case argValue deletedId of
                 MUInt v -> Just $ IM.delete v oldOm

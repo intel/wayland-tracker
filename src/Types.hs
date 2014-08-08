@@ -62,6 +62,7 @@ data ParsedMessage = UnknownMessage
                          msgType :: MessageType,
                          msgName :: String,
                          msgInterface :: String,
+                         msgObject :: Int,
                          msgArguments :: [MArgument]
                      } deriving (Eq, Show)
 
@@ -109,8 +110,9 @@ instance A.ToJSON MessageType where
 
 instance A.ToJSON ParsedMessage where
     toJSON UnknownMessage = A.String "unknown message"
-    toJSON (Message t n i as) = A.object
+    toJSON (Message t n i o as) = A.object
         [ "type" A..= t,
           "name" A..= n,
+          "object" A..= o,
           "interface" A..= i,
           "arguments" A..= as ]
