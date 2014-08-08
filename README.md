@@ -31,13 +31,12 @@ For example, command
 
     wayland-tracker json -x wayland.xml -x xdg-shell.xml -- weston-terminal
 
-might print out this data (and much more):
+might messages such as these (and much more):
 
-    {"message":{"arguments":[{"value":{"value":3,"type":"NewId"},"name":"callback"}],"name":"sync","interface":"wl_display","type":"Request"},"timestamp":"0.112595s"}
-    {"message":{"arguments":[{"value":{"value":2,"type":"NewId"},"name":"registry"}],"name":"get_registry","interface":"wl_display","type":"Request"},"timestamp":"0.112595s"}
-    {"message":{"arguments":[{"value":{"value":3,"type":"UInt"},"name":"id"}],"name":"delete_id","interface":"wl_display","type":"Event"},"timestamp":"0.112988s"}
-    {"message":{"arguments":[{"value":{"value":5276,"type":"UInt"},"name":"callback_data"}],"name":"done","interface":"wl_callback","type":"Event"},"timestamp":"0.112988s"}
-    {"message":{"arguments":[{"value":{"value":18,"type":"UInt"},"name":"name"},{"value":{"value":"screenshooter","type":"String"},"name":"interface"},{"value":{"value":1,"type":"UInt"},"name":"version"}],"name":"global","interface":"wl_registry","type":"Event"},"timestamp":"0.112988s"}
+    {"message":{"arguments":[{"value":{"value":3,"type":"NewId"},"name":"callback"}],"name":"sync","interface":"wl_display","object":1,"type":"Request"},"timestamp":"0.158632s"}
+    {"message":{"arguments":[{"value":{"value":2,"type":"NewId"},"name":"registry"}],"name":"get_registry","interface":"wl_display","object":1,"type":"Request"},"timestamp":"0.158632s"}
+    {"message":{"arguments":[{"value":{"value":3,"type":"UInt"},"name":"id"}],"name":"delete_id","interface":"wl_display","object":1,"type":"Event"},"timestamp":"0.158947s"}
+    {"message":{"arguments":[{"value":{"value":5244,"type":"UInt"},"name":"callback_data"}],"name":"done","interface":"wl_callback","object":3,"type":"Event"},"timestamp":"0.158947s"}
 
 Output mode `json_pretty` uses a JSON pretty-printer to make JSON messages more
 human-readable while using exactly the same options as `json`:
@@ -46,6 +45,7 @@ human-readable while using exactly the same options as `json`:
         "message": {
             "type": "Request",
             "name": "set_window_geometry",
+            "object": 15,
             "interface": "xdg_surface",
             "arguments": [
                 {
