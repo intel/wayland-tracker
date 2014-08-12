@@ -100,6 +100,11 @@ getMessageTypeString Event = C8.pack "Event"
 getMessageTypeString Request = C8.pack "Request"
 
 
+getMessageTypeArrow :: MessageType -> BS.ByteString
+getMessageTypeArrow Event = C8.pack "<- "
+getMessageTypeArrow Request = C8.pack " ->"
+
+
 writeBinaryLog :: Logger -> Clock.NominalDiffTime -> ParsedBinaryMessage -> IO ()
 writeBinaryLog (Logger lh _) ts msg = do
     let stamp = generateTS ts
@@ -110,17 +115,13 @@ writeBinaryLog (Logger lh _) ts msg = do
 toSimple :: Clock.NominalDiffTime -> ParsedMessage -> BS.ByteString
 toSimple ts (UnknownMessage t) = let
     stamp = generateTS ts
-    arrow = case t of
-        Request -> C8.pack " ->"
-        Event -> C8.pack "<- "
+    arrow = getMessageTypeArrow t
     in
         BS.concat [stamp, bSpace, arrow, bSpace, C8.pack "Unknown message"]
 
 toSimple ts (Message t n i o args) = let
     stamp = generateTS ts
-    arrow = case t of
-        Request -> C8.pack " ->"
-        Event -> C8.pack "<- "
+    arrow = getMessageTypeArrow t
     simpleArgs as = BS.intercalate (C8.pack ", ") (map argToString as)
     argToString (MArgument _ a) = case a of
         MInt v -> C8.pack $ show v
