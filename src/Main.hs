@@ -99,7 +99,7 @@ main :: IO ()
 main = do
     let m = modes_ [binaryMode += auto, simpleMode, jsonMode, jsonPrettyMode]
             += program "wayland-tracker"
-            += summary "Wayland protocol message dumper, version 0.1"
+            += summary "Wayland protocol message dumper, version 0.2"
             += helpArg [name "h"]
     parsedArgs <- cmdArgs_ m
     case parsedArgs of
