@@ -221,10 +221,10 @@ messageParser om _ t = do
                 return $ Message t messageName interfaceName sId args
             Nothing -> do
                 A.take (size - 8)
-                return UnknownMessage
+                return $ UnknownMessage t
         Nothing -> do
             A.take (size - 8)
-            return UnknownMessage
+            return $ UnknownMessage t
 
     where
         getMap :: MessageType -> WInterfaceDescription -> WMessageMap
@@ -261,7 +261,7 @@ updateMap im msg om =
                 "bind" -> Maybe.fromMaybe om (processBind om msg)
                 "delete_id" -> Maybe.fromMaybe om (processDeleteId om msg)
                 _ -> Maybe.fromMaybe om (processCreateObject om msg)
-        UnknownMessage -> om
+        UnknownMessage _ -> om
     where
         processBind oldOm (Message _ _ _ _ args) = do
             iface <- List.find (\a -> argName a == "interface") args

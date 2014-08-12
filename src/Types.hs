@@ -57,7 +57,7 @@ data MArgument = MArgument
       argValue      :: MArgumentValue
     } deriving (Eq, Show)
 
-data ParsedMessage = UnknownMessage
+data ParsedMessage = UnknownMessage MessageType
                    | Message
     { msgType       :: MessageType,
       msgName       :: String,
@@ -109,7 +109,7 @@ instance A.ToJSON MessageType where
     toJSON Event = A.String "Event"
 
 instance A.ToJSON ParsedMessage where
-    toJSON UnknownMessage = A.String "unknown message"
+    toJSON (UnknownMessage _) = A.String "Unknown message"
     toJSON (Message t n i o as) = A.object
         [ "type" A..= t,
           "name" A..= n,

@@ -108,10 +108,13 @@ writeBinaryLog (Logger lh _) ts msg = do
 
 
 toSimple :: Clock.NominalDiffTime -> ParsedMessage -> BS.ByteString
-toSimple ts UnknownMessage = let
+toSimple ts (UnknownMessage t) = let
     stamp = generateTS ts
+    arrow = case t of
+        Request -> C8.pack " ->"
+        Event -> C8.pack "<- "
     in
-        BS.concat [stamp, bSpace, C8.pack "Unknown message"]
+        BS.concat [stamp, bSpace, arrow, bSpace, C8.pack "Unknown message"]
 
 toSimple ts (Message t n i o args) = let
     stamp = generateTS ts
