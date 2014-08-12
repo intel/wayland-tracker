@@ -22,41 +22,45 @@ OF THIS SOFTWARE.
 
 module Tracker where
 
-import qualified Data.Binary as B
-import qualified Data.Binary.Get as BG
-import qualified Data.Binary.Bits.Get as BBG
-import qualified Control.Monad as M
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.Word as W
-import qualified System.IO as IO
-import qualified System.IO.Error as Err
-import qualified System.Environment as E
-import qualified System.Exit as Exit
-import qualified System.Posix.User as PU
-import qualified System.Posix.IO as PI
-import qualified System.Posix.Process as Process
-import qualified System.Posix.Signals as Signals
-import qualified System.Posix.Types as PT
-import qualified Network.Socket as Socket
-import qualified Control.Concurrent as CC
-import qualified Control.Concurrent.STM as STM
-import qualified Data.Maybe as Maybe
-import qualified Data.Map.Strict as DM
-import qualified Data.IntMap as IM
-import qualified Data.ByteString.UTF8 as U
-import qualified Data.List as List
+import qualified Control.Concurrent         as CC
+import qualified Control.Concurrent.STM     as STM
+import qualified Control.Monad              as M
+import qualified Data.Attoparsec.Binary     as AB
 import qualified Data.Attoparsec.ByteString as A
-import qualified Data.Attoparsec.Binary as AB
-import qualified Data.Time.Clock as Clock
-import qualified System.Endian as Endian
+import qualified Data.Binary                as B
+import qualified Data.Binary.Bits.Get       as BBG
+import qualified Data.Binary.Get            as BG
+import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Lazy       as BSL
+import qualified Data.ByteString.UTF8       as U
+import qualified Data.IntMap                as IM
+import qualified Data.List                  as List
+import qualified Data.Map.Strict            as DM
+import qualified Data.Maybe                 as Maybe
+import qualified Data.Time.Clock            as Clock
+import qualified Data.Word                  as W
+import qualified Network.Socket             as Socket
+import qualified System.Endian              as Endian
+import qualified System.Environment         as E
+import qualified System.Exit                as Exit
+import qualified System.IO                  as IO
+import qualified System.IO.Error            as Err
+import qualified System.Posix.IO            as PI
+import qualified System.Posix.Process       as Process
+import qualified System.Posix.Signals       as Signals
+import qualified System.Posix.Types         as PT
+import qualified System.Posix.User          as PU
 
-import Types
-import Log
-import ParseWaylandXML
-import Wayland
+import           Log
+import           ParseWaylandXML
+import           Types
+import           Wayland
 
-data Event = ServerClosedSocket | ClientClosedSocket | ProcessingEnded | SigChld | SigInt
+data Event = ServerClosedSocket
+           | ClientClosedSocket
+           | ProcessingEnded
+           | SigChld
+           | SigInt
     deriving (Show, Eq)
 
 -- mapping of interface names to interfaces
@@ -92,8 +96,8 @@ putStrLnErr s = do
 -- debug: dump a bytestring in hex format to stdout
 dumpByteString :: BS.ByteString -> IO ()
 dumpByteString bs = do
-        M.mapM_ (\n -> putStr $ N.showHex n " ") bytes
-        putStrLn ""
+    M.mapM_ (\n -> putStr $ N.showHex n " ") bytes
+    putStrLn ""
     where
         bytes = BS.unpack bs
 -}

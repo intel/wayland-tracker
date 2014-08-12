@@ -26,28 +26,28 @@ module Main
 
 where
 
-import System.Console.CmdArgs
+import           System.Console.CmdArgs
 
-import Types
-import Tracker
+import           Tracker
+import           Types
 
-data OutputMode = BinaryMode {
-                    output :: Maybe String,
-                    command :: String,
-                    commandArgs :: [String]
-                }
-                | JsonMode {
-                    xmlFile :: [String],
-                    output :: Maybe String,
-                    command :: String,
-                    commandArgs :: [String]
-                }
-                | JsonPrettyMode {
-                    xmlFile :: [String],
-                    output :: Maybe String,
-                    command :: String,
-                    commandArgs :: [String]
-                } deriving (Show, Data, Typeable)
+data OutputMode = BinaryMode
+   { output      :: Maybe String,
+     command     :: String,
+     commandArgs :: [String]
+   }
+                | JsonMode
+   { xmlFile     :: [String],
+     output      :: Maybe String,
+     command     :: String,
+     commandArgs :: [String]
+   }
+                | JsonPrettyMode
+   { xmlFile     :: [String],
+     output      :: Maybe String,
+     command     :: String,
+     commandArgs :: [String]
+   } deriving (Show, Data, Typeable)
 
 
 binaryMode :: Annotate Ann

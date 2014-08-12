@@ -28,16 +28,16 @@ module Log (
 
 where
 
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Base16 as B16
-import qualified Data.ByteString.Char8 as C8
-import qualified Data.Aeson as A
+import qualified Data.Aeson               as A
 import qualified Data.Aeson.Encode.Pretty as AP
-import qualified Data.Time.Clock as Clock
-import qualified System.IO as IO
+import qualified Data.ByteString          as BS
+import qualified Data.ByteString.Base16   as B16
+import qualified Data.ByteString.Char8    as C8
+import qualified Data.ByteString.Lazy     as BSL
+import qualified Data.Time.Clock          as Clock
+import qualified System.IO                as IO
 
-import Types
+import           Types
 
 data StampedMessage = StampedMessage String ParsedMessage deriving (Eq, Show)
 

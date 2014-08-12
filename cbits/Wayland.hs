@@ -20,17 +20,18 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
 OF THIS SOFTWARE.
 -}
 
-{-# LANGUAGE CPP, ForeignFunctionInterface #-}
+{-# LANGUAGE CPP                      #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 
 module Wayland (sendToWayland, recvFromWayland)
 
 where
 
-import Foreign
-import Foreign.C.Types
-import qualified Data.ByteString as BS
-import qualified Network.Socket as Socket
 import qualified Control.Concurrent as CC
+import qualified Data.ByteString    as BS
+import           Foreign
+import           Foreign.C.Types
+import qualified Network.Socket     as Socket
 
 foreign import ccall unsafe "wayland-msg-handling.h sendmsg_wayland"
     c_sendmsg_wayland  :: CInt -- fd

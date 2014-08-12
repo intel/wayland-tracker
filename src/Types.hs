@@ -33,12 +33,12 @@ module Types (
 
 where
 
-import qualified Data.ByteString as BS
-import qualified Data.Aeson as A
-import qualified System.IO as IO
-import qualified Data.ByteString.Char8 as C8
+import qualified Data.Aeson             as A
+import qualified Data.ByteString        as BS
 import qualified Data.ByteString.Base16 as B16
-import qualified Numeric as N
+import qualified Data.ByteString.Char8  as C8
+import qualified Numeric                as N
+import qualified System.IO              as IO
 
 data MessageType = Request | Event deriving (Eq, Show)
 
@@ -52,27 +52,27 @@ data MArgumentValue = MInt Int
                     | MObject Int
                            deriving (Eq, Show)
 
-data MArgument = MArgument {
-                     argName :: String,
-                     argValue :: MArgumentValue
-                 } deriving (Eq, Show)
+data MArgument = MArgument
+    { argName       :: String,
+      argValue      :: MArgumentValue
+    } deriving (Eq, Show)
 
 data ParsedMessage = UnknownMessage
-                   | Message {
-                         msgType :: MessageType,
-                         msgName :: String,
-                         msgInterface :: String,
-                         msgObject :: Int,
-                         msgArguments :: [MArgument]
-                     } deriving (Eq, Show)
+                   | Message
+    { msgType       :: MessageType,
+      msgName       :: String,
+      msgInterface  :: String,
+      msgObject     :: Int,
+      msgArguments  :: [MArgument]
+    } deriving (Eq, Show)
 
-data ParsedBinaryMessage = ParsedBinaryMessage {
-                                binaryMsgType :: MessageType,
-                                senderId :: Int,
-                                opCode :: Int,
-                                msgSize :: Int,
-                                msgData :: BS.ByteString
-                           } deriving (Eq, Show)
+data ParsedBinaryMessage = ParsedBinaryMessage
+    { binaryMsgType :: MessageType,
+      senderId      :: Int,
+      opCode        :: Int,
+      msgSize       :: Int,
+      msgData       :: BS.ByteString
+    } deriving (Eq, Show)
 
 data LogType = Binary | Json | JsonPretty
 

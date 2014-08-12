@@ -30,30 +30,37 @@ module ParseWaylandXML (
 
 where
 
-import qualified Text.XML.Light as XML
-import qualified Data.IntMap as IM
-import qualified Data.List as L
+import qualified Data.IntMap     as IM
+import qualified Data.List       as L
 import qualified Data.Map.Strict as DM
-import qualified Data.Maybe as Maybe
+import qualified Data.Maybe      as Maybe
+import qualified Text.XML.Light  as XML
 
-data WArgumentType = WInt | WUInt | WFixed | WString | WObject | WNewId | WArray | WFd deriving (Eq, Show)
+data WArgumentType = WInt
+                   | WUInt
+                   | WFixed
+                   | WString
+                   | WObject
+                   | WNewId
+                   | WArray
+                   | WFd deriving (Eq, Show)
 
-data WArgumentDescription = WArgumentDescription {
-    argDescrName :: String,
-    argDescrType :: WArgumentType,
-    argDescrInterface :: String
-} deriving (Eq, Show)
+data WArgumentDescription = WArgumentDescription
+    { argDescrName      :: String,
+      argDescrType      :: WArgumentType,
+      argDescrInterface :: String
+    } deriving (Eq, Show)
 
-data WMessageDescription = WMessageDescription {
-    msgDescrName :: String,
-    msgDescrArgs :: [WArgumentDescription]
-} deriving (Eq, Show)
+data WMessageDescription = WMessageDescription
+    { msgDescrName :: String,
+      msgDescrArgs :: [WArgumentDescription]
+    } deriving (Eq, Show)
 
-data WInterfaceDescription = WInterfaceDescription {
-    interfaceDescrName :: String,
-    interfaceRequests :: WMessageMap,
-    interfaceEvents :: WMessageMap
-} deriving (Eq, Show)
+data WInterfaceDescription = WInterfaceDescription
+    { interfaceDescrName :: String,
+      interfaceRequests  :: WMessageMap,
+      interfaceEvents    :: WMessageMap
+    } deriving (Eq, Show)
 
 type WMessageMap = IM.IntMap WMessageDescription
 
