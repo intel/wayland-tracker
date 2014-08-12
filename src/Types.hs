@@ -74,7 +74,7 @@ data ParsedBinaryMessage = ParsedBinaryMessage
       msgData       :: BS.ByteString
     } deriving (Eq, Show)
 
-data LogType = Binary | Json | JsonPretty
+data LogType = Binary | Json | JsonPretty | Simple
 
 data Logger = Logger IO.Handle LogType
 

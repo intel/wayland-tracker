@@ -36,6 +36,12 @@ data OutputMode = BinaryMode
      command     :: String,
      commandArgs :: [String]
    }
+                | SimpleMode
+   { xmlFile     :: [String],
+     output      :: Maybe String,
+     command     :: String,
+     commandArgs :: [String]
+   }
                 | JsonMode
    { xmlFile     :: [String],
      output      :: Maybe String,
@@ -57,6 +63,16 @@ binaryMode = record BinaryMode { output = Nothing, command = "", commandArgs = [
             command := def += argPos 0 += typ "PROGRAM",
             commandArgs := def += args += typ "PROGRAM OPTIONS"
         ] += name "binary"
+
+
+simpleMode :: Annotate Ann
+simpleMode = record SimpleMode { xmlFile = [], output = Nothing, command = "", commandArgs = [] }
+        [
+            xmlFile := def += typFile += help "Protocol description XML file",
+            output := def += typFile += help "Output file",
+            command := def += argPos 0 += typ "PROGRAM",
+            commandArgs := def += args += typ "PROGRAM OPTIONS"
+        ] += name "simple"
 
 
 jsonMode :: Annotate Ann
@@ -81,12 +97,13 @@ jsonPrettyMode = record JsonPrettyMode { xmlFile = [], output = Nothing, command
 
 main :: IO ()
 main = do
-    let m = modes_ [binaryMode += auto, jsonMode, jsonPrettyMode]
+    let m = modes_ [binaryMode += auto, simpleMode, jsonMode, jsonPrettyMode]
             += program "wayland-tracker"
             += summary "Wayland protocol message dumper, version 0.1"
             += helpArg [name "h"]
     parsedArgs <- cmdArgs_ m
     case parsedArgs of
         BinaryMode o c cargs -> runApplication [] Binary o c cargs
+        SimpleMode xs o c cargs -> runApplication xs Simple o c cargs
         JsonMode xs o c cargs -> runApplication xs Json o c cargs
         JsonPrettyMode xs o c cargs -> runApplication xs JsonPretty o c cargs

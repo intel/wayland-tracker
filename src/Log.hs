@@ -73,7 +73,7 @@ splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
 
 
 generateTS :: Clock.NominalDiffTime -> BS.ByteString
-generateTS time = BS.concat $ [C8.pack "[", padBs 12 $ C8.pack (show time), C8.pack "]" ]
+generateTS time = BS.concat [C8.pack "[", padBs 12 $ C8.pack (show time), C8.pack "]" ]
 
 
 bSpace :: C8.ByteString
@@ -107,6 +107,38 @@ writeBinaryLog (Logger lh _) ts msg = do
     IO.hFlush lh
 
 
+toSimple :: Clock.NominalDiffTime -> ParsedMessage -> BS.ByteString
+toSimple ts UnknownMessage = let
+    stamp = generateTS ts
+    in
+        BS.concat [stamp, bSpace, C8.pack "Unknown message"]
+
+toSimple ts (Message t n i o args) = let
+    stamp = generateTS ts
+    arrow = case t of
+        Request -> C8.pack " ->"
+        Event -> C8.pack "<- "
+    simpleArgs as = BS.intercalate (C8.pack ", ") (map argToString as)
+    argToString (MArgument _ a) = case a of
+        MInt v -> C8.pack $ show v
+        MUInt v -> C8.pack $ show v
+        MString v -> BS.concat [C8.singleton '"', C8.pack v, C8.singleton '"']
+        MFixed s fp sp -> BS.concat $ [C8.singleton '-' | s] ++
+                [C8.pack $ show fp, C8.singleton '.', C8.pack $ show sp]
+        MArray bs -> BS.concat [C8.singleton '[', B16.encode bs, C8.singleton ']']
+        MFd -> C8.pack "fd"
+        MNewId object interface -> let
+            i = if null interface then C8.pack "[unknown]" else C8.pack interface
+            in
+                BS.concat [C8.pack "new id ", i, C8.singleton '@', C8.pack $ show object]
+        MObject v -> BS.concat [C8.pack "object ", C8.pack $ show v]
+
+    in
+        BS.concat [stamp, bSpace, arrow, bSpace, C8.pack i, C8.singleton '@',
+                   C8.pack $ show o, C8.singleton '.', C8.pack n, C8.singleton '(',
+                   simpleArgs args, C8.singleton ')']
+
+
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
 writeLog (Logger lh lt) ts msg = do
     -- let stamp = generateTS ts
@@ -118,6 +150,10 @@ writeLog (Logger lh lt) ts msg = do
             IO.hFlush lh
         JsonPretty -> do
             BSL.hPut lh $ AP.encodePretty' conf smsg
+            BS.hPut lh bNewLine
+            IO.hFlush lh
+        Simple -> do
+            BS.hPut lh $ toSimple ts msg
             BS.hPut lh bNewLine
             IO.hFlush lh
     where
