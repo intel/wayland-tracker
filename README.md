@@ -189,6 +189,5 @@ Future work and improvement ideas
 ---------------------------------
 
 * "pcap" output mode (maybe using text2pcap tool?)
-* "simple" output mode with human-readable output and one line messages
 * use quickcheck for testing parsing and log formats
 
