@@ -24,6 +24,7 @@ module Tracker where
 
 import qualified Control.Concurrent         as CC
 import qualified Control.Concurrent.STM     as STM
+import qualified Control.Exception          as Exception
 import qualified Control.Monad              as M
 import qualified Data.Attoparsec.Binary     as AB
 import qualified Data.Attoparsec.ByteString as A
@@ -327,13 +328,17 @@ processingThread eventV ts xfs chan lh lt = do
     case lt of
         Binary -> processBinaryData chan
         _ -> do
-            xmlData <- readXmlData xfs DM.empty
-            case getXmlData xmlData of
-                Nothing -> putStrLnErr "reading or parsing of XML files failed"
-                Just (im, displayDescr) -> do
-                    -- initialize object map with known global mapping 1 -> "wl_display"
-                    let objectMap = IM.insert 1 displayDescr IM.empty
-                    processData chan objectMap im
+            res <- Exception.try $ readXmlData xfs DM.empty :: IO (Either Exception.IOException (Maybe InterfaceMap))
+            case res of
+                Left _ -> putStrLnErr "Error reading XML files"
+                Right xmlData -> do
+                    case getXmlData xmlData of
+                        Nothing -> putStrLnErr "Error parsing of XML files"
+                        Just (im, displayDescr) -> do
+                            -- initialize object map with known global mapping:
+                            -- 1 -> "wl_display"
+                            let objectMap = IM.insert 1 displayDescr IM.empty
+                            processData chan objectMap im
 
     -- send an error message to the channel if we end here: it means
     -- that something has gone wrong with the XML files or that the main
