@@ -21,15 +21,17 @@ Using wayland-tracker
 Wayland-tracker sits between Wayland server (such as Weston) and a Wayland
 client, dumping all message traffic to both directions.
 
-Wayland-tracker has three output modes: `binary`, `json` and `json_pretty`. The
-JSON modes output the messages in JSON format and binary mode outputs the
-messages in binary format. To use JSON format, you need to have the protocol
-description XML files that are being used by the application and server you are
-running. The XML protocol files are provided using `-x` command line option.
+Wayland-tracker has four output modes: `binary`, `simple`, `json` and
+`json_pretty`. The simple mode outputs the messages in a format that is very
+close to WAYLAND_DEBUG style logging.  The JSON modes output the messages in
+JSON format and binary mode outputs the messages in binary format. To use JSON
+or simple format, you need to have the protocol description XML files that are
+being used by the application and server you are running. The XML protocol files
+are provided using `-x` command line option.
 
 For example, command
 
-    wayland-tracker json -x wayland.xml -x xdg-shell.xml -- weston-terminal
+    wayland-tracker json -x wayland.xml -x xdg-shell.xml -x workspaces.xml -- weston-terminal
 
 might messages such as these (and much more):
 
@@ -81,6 +83,23 @@ human-readable while using exactly the same options as `json`:
         "timestamp": "0.157951s"
     }
 
+Output mode `simple` is used with the following:
+
+    wayland-tracker simple -x wayland.xml -x xdg-shell.xml -x workspaces.xml -- weston-terminal
+
+The simple output looks like this:
+
+    [0.100927s   ]  -> wl_registry@2.bind(3, "wl_subcompositor", 1, new id [unknown]@5)
+    [0.100927s   ]  -> wl_registry@2.bind(2, "wl_compositor", 3, new id [unknown]@4)
+    [0.102968s   ] <-  xdg_surface@15.configure(0, 0, [04000000], 9969)
+    [0.102968s   ] <-  wl_surface@14.enter(object 11)
+    [0.102968s   ] <-  wl_display@1.delete_id(17)
+    [0.102968s   ] <-  wl_display@1.delete_id(16)
+    [0.102968s   ] <-  workspace_manager@13.state(0, 1)
+    [0.102968s   ] <-  wl_output@11.done()
+    [0.102968s   ] <-  wl_output@11.mode(3, 1024, 640, 60000)
+
+The arrows indicate the message direction (`->` for requests, `<-` for events).
 A good place to find the protocol XML files are the Wayland and Weston git
 repositiories.
 
