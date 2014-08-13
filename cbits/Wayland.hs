@@ -71,8 +71,8 @@ recvFromWayland :: Socket.Socket -> IO (BS.ByteString, [Int])
 recvFromWayland s = allocaArray 4096 $ \cbuf -> do
     CC.threadWaitRead $ fromIntegral socket
     alloca $ \nFds_ptr ->
-        allocaArray 28 $ \fdArray -> do
-            len <- c_recvmsg_wayland socket cbuf 4096 fdArray 28 nFds_ptr
+        allocaArray (4*28) $ \fdArray -> do
+            len <- c_recvmsg_wayland socket cbuf 4096 fdArray (4*28) nFds_ptr
             if len < 0
                 then ioError $ userError "recvmsg failed"
                 else do
