@@ -643,6 +643,7 @@ runApplication xfs lt lf cmd cmdargs = do
                 CC.killThread st
                 CC.killThread ct
                 CC.killThread rt
+                CC.killThread wt
 
                 Socket.close clientSock
                 Socket.close serverSock
