@@ -36,6 +36,7 @@ import qualified Data.ByteString.Char8    as C8
 import qualified Data.ByteString.Lazy     as BSL
 import qualified Data.Time.Clock          as Clock
 import qualified System.IO                as IO
+import           Data.Monoid
 
 import           Types
 
@@ -54,7 +55,7 @@ padBs neededSize bs =
         padding n = C8.replicate n ' '
     in
         if extra > 0
-            then BS.append bs $ padding extra
+            then bs <> (padding extra)
             else bs
 
 
@@ -73,7 +74,7 @@ splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
 
 
 generateTS :: Clock.NominalDiffTime -> BS.ByteString
-generateTS time = BS.concat [C8.pack "[", padBs 12 $ C8.pack (show time), C8.pack "]" ]
+generateTS time = C8.singleton '[' <> (padBs 12 $ C8.pack (show time)) <> C8.singleton ']'
 
 
 bSpace :: C8.ByteString
@@ -87,12 +88,13 @@ bNewLine = C8.singleton '\n'
 toStringBinary :: BS.ByteString -> ParsedBinaryMessage -> BS.ByteString
 toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
     let typeS = padBs 7 $ getMessageTypeString t
-        senderS = BS.concat [C8.pack "sender=", padBs 2 $ C8.pack (show sender)]
-        opcodeS = BS.concat [C8.pack "op=", padBs 2 $ C8.pack (show opcode)]
-        sizeS = BS.concat [C8.pack "size=", padBs 2 $ C8.pack (show size)]
+        senderS = C8.pack "sender=" <> (padBs 2 $ C8.pack (show sender))
+        opcodeS = C8.pack "op=" <> (padBs 2 $ C8.pack (show opcode))
+        sizeS = C8.pack "size=" <> (padBs 2 $ C8.pack (show size))
         dataS = splitBs 8 bSpace $ B16.encode d -- split between 8 hex chars
     in
-        BS.concat [ts, bSpace, typeS, bSpace, senderS, bSpace, opcodeS, bSpace, sizeS, bSpace, bSpace, dataS, bNewLine]
+        ts <> bSpace <> typeS <> bSpace <> senderS <> bSpace <> opcodeS <> bSpace <>
+                sizeS <> bSpace <> bSpace <> dataS <> bNewLine
 
 
 getMessageTypeString :: MessageType -> BS.ByteString
@@ -117,7 +119,7 @@ toSimple ts (UnknownMessage t) = let
     stamp = generateTS ts
     arrow = getMessageTypeArrow t
     in
-        BS.concat [stamp, bSpace, arrow, bSpace, C8.pack "Unknown message"]
+        stamp <> bSpace <> arrow <> bSpace <> C8.pack "Unknown message"
 
 toSimple ts (Message t n i o args) = let
     stamp = generateTS ts
@@ -126,21 +128,21 @@ toSimple ts (Message t n i o args) = let
     argToString (MArgument _ a) = case a of
         MInt v -> C8.pack $ show v
         MUInt v -> C8.pack $ show v
-        MString v -> BS.concat [C8.singleton '"', C8.pack v, C8.singleton '"']
+        MString v -> C8.singleton '"' <> C8.pack v <> C8.singleton '"'
         MFixed s fp sp -> BS.concat $ [C8.singleton '-' | s] ++
                 [C8.pack $ show fp, C8.singleton '.', C8.pack $ show sp]
-        MArray bs -> BS.concat [C8.singleton '[', B16.encode bs, C8.singleton ']']
+        MArray bs -> C8.singleton '[' <> B16.encode bs <> C8.singleton ']'
         MFd -> C8.pack "fd"
         MNewId object interface -> let
-            i = if null interface then C8.pack "[unknown]" else C8.pack interface
+            realInterface = if null interface then C8.pack "[unknown]" else C8.pack interface
             in
-                BS.concat [C8.pack "new id ", i, C8.singleton '@', C8.pack $ show object]
-        MObject v -> BS.concat [C8.pack "object ", C8.pack $ show v]
+                C8.pack "new id " <> realInterface <> C8.singleton '@' <> (C8.pack $ show object)
+        MObject v -> C8.pack "object " <> (C8.pack $ show v)
 
     in
-        BS.concat [stamp, bSpace, arrow, bSpace, C8.pack i, C8.singleton '@',
-                   C8.pack $ show o, C8.singleton '.', C8.pack n, C8.singleton '(',
-                   simpleArgs args, C8.singleton ')']
+        stamp <> bSpace <> arrow <> bSpace <> C8.pack i <> C8.singleton '@' <>
+                   (C8.pack $ show o) <> C8.singleton '.' <> C8.pack n <> C8.singleton '(' <>
+                   simpleArgs args <> C8.singleton ')'
 
 
 writeLog :: Logger -> Clock.NominalDiffTime -> ParsedMessage -> IO ()
