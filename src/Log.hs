@@ -55,7 +55,7 @@ padBs neededSize bs =
         padding n = C8.replicate n ' '
     in
         if extra > 0
-            then bs <> (padding extra)
+            then bs <> padding extra
             else bs
 
 
@@ -66,15 +66,15 @@ splitBs chunkSize between bstr = BS.intercalate between $ split bstr []
     where
         split bs acc =
             if BS.null bs
-                then reverse $ acc
+                then reverse acc
                 else let
                         chunk = BS.take chunkSize bs
                      in
-                        split ((BS.drop chunkSize) bs) (chunk:acc)
+                        split (BS.drop chunkSize bs) (chunk:acc)
 
 
 generateTS :: Clock.NominalDiffTime -> BS.ByteString
-generateTS time = C8.singleton '[' <> (padBs 12 $ C8.pack (show time)) <> C8.singleton ']'
+generateTS time = C8.singleton '[' <> padBs 12 (C8.pack (show time)) <> C8.singleton ']'
 
 
 bSpace :: C8.ByteString
@@ -88,9 +88,9 @@ bNewLine = C8.singleton '\n'
 toStringBinary :: BS.ByteString -> ParsedBinaryMessage -> BS.ByteString
 toStringBinary ts (ParsedBinaryMessage t sender opcode size d) =
     let typeS = padBs 7 $ getMessageTypeString t
-        senderS = C8.pack "sender=" <> (padBs 2 $ C8.pack (show sender))
-        opcodeS = C8.pack "op=" <> (padBs 2 $ C8.pack (show opcode))
-        sizeS = C8.pack "size=" <> (padBs 2 $ C8.pack (show size))
+        senderS = C8.pack "sender=" <> padBs 2 (C8.pack (show sender))
+        opcodeS = C8.pack "op=" <> padBs 2 (C8.pack (show opcode))
+        sizeS = C8.pack "size=" <> padBs 2 (C8.pack (show size))
         dataS = splitBs 8 bSpace $ B16.encode d -- split between 8 hex chars
     in
         ts <> bSpace <> typeS <> bSpace <> senderS <> bSpace <> opcodeS <> bSpace <>
@@ -134,14 +134,14 @@ toSimple ts (Message t n i o args) = let
         MArray bs -> C8.singleton '[' <> B16.encode bs <> C8.singleton ']'
         MFd -> C8.pack "fd"
         MNewId object interface -> let
-            realInterface = if null interface then C8.pack "[unknown]" else C8.pack interface
+            realInterface = C8.pack $ if null interface then "[unknown]" else interface
             in
-                C8.pack "new id " <> realInterface <> C8.singleton '@' <> (C8.pack $ show object)
-        MObject v -> C8.pack "object " <> (C8.pack $ show v)
+                C8.pack "new id " <> realInterface <> C8.singleton '@' <> C8.pack (show object)
+        MObject v -> C8.pack "object " <> C8.pack (show v)
 
     in
         stamp <> bSpace <> arrow <> bSpace <> C8.pack i <> C8.singleton '@' <>
-                   (C8.pack $ show o) <> C8.singleton '.' <> C8.pack n <> C8.singleton '(' <>
+                   C8.pack (show o) <> C8.singleton '.' <> C8.pack n <> C8.singleton '(' <>
                    simpleArgs args <> C8.singleton ')'
 
 

@@ -331,14 +331,13 @@ processingThread eventV ts xfs chan lh lt = do
             res <- Exception.try $ readXmlData xfs DM.empty :: IO (Either Exception.IOException (Maybe InterfaceMap))
             case res of
                 Left _ -> putStrLnErr "Error reading XML files"
-                Right xmlData -> do
-                    case getXmlData xmlData of
-                        Nothing -> putStrLnErr "Error parsing of XML files"
-                        Just (im, displayDescr) -> do
-                            -- initialize object map with known global mapping:
-                            -- 1 -> "wl_display"
-                            let objectMap = IM.insert 1 displayDescr IM.empty
-                            processData chan objectMap im
+                Right xmlData -> case getXmlData xmlData of
+                    Nothing -> putStrLnErr "Error parsing of XML files"
+                    Just (im, displayDescr) -> do
+                        -- initialize object map with known global mapping:
+                        -- 1 -> "wl_display"
+                        let objectMap = IM.insert 1 displayDescr IM.empty
+                        processData chan objectMap im
 
     -- send an error message to the channel if we end here: it means
     -- that something has gone wrong with the XML files or that the main
@@ -473,9 +472,7 @@ passThread input output = do
         loop i o = do
             closed <- IO.hIsClosed i
             if closed
-                then do
-                    -- close also the output fd
-                    IO.hClose o
+                then IO.hClose o -- close also the output fd
                 else do
                     str <- IO.hGetContents i
                     IO.hPutStr o str
