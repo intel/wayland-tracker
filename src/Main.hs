@@ -27,6 +27,7 @@ module Main
 where
 
 import           System.Console.CmdArgs
+import           System.Environment
 
 import           Tracker
 import           Types
@@ -101,7 +102,15 @@ main = do
             += program "wayland-tracker"
             += summary "Wayland protocol message dumper, version 0.4"
             += helpArg [name "h"]
-    parsedArgs <- cmdArgs_ m
+    -- add '--help' to the command line in case the command line was empty
+    originalArgs <- getArgs
+
+    let args = if null originalArgs
+        then ["--help"]
+        else originalArgs
+
+    parsedArgs <- withArgs args $ cmdArgs_ m
+
     case parsedArgs of
         BinaryMode o c cargs -> runApplication [] Binary o c cargs
         SimpleMode xs o c cargs -> runApplication xs Simple o c cargs
