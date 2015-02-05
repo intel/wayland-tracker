@@ -33,7 +33,7 @@ For example, command
 
     wayland-tracker json -x wayland.xml -x xdg-shell.xml -x workspaces.xml -- weston-terminal
 
-might messages such as these (and much more):
+might print messages such as these (and much more):
 
     {"message":{"arguments":[{"value":{"value":3,"type":"NewId"},"name":"callback"}],"name":"sync","interface":"wl_display","object":1,"type":"Request"},"timestamp":"0.158632s"}
     {"message":{"arguments":[{"value":{"value":2,"type":"NewId"},"name":"registry"}],"name":"get_registry","interface":"wl_display","object":1,"type":"Request"},"timestamp":"0.158632s"}
