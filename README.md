@@ -144,8 +144,8 @@ command line:
 
     wayland-tracker binary -- weston-terminal --help
 
-Building wayland-tracker
-------------------------
+Building wayland-tracker using cabal
+------------------------------------
 
 Wayland-tracker is written (mostly) in Haskell. To build the software, you need
 to first install ghc, gcc and cabal using your package manager. For instance, in
@@ -157,7 +157,7 @@ In Ubuntu 14.04 a similar command would be:
 
     sudo apt-get install cabal-install ghc build-essentials
 
-Then, in the source repository update the cabal package database:
+Then, in the source directory update the cabal package database:
 
     cabal update
 
@@ -174,6 +174,15 @@ The binary will be created to `dist/build/wayland-tracker/wayland-tracker`. To
 install it in `$HOME/.cabal/bin/wayland-tracker`, use:
 
     cabal install
+
+
+Building wayland-tracker using stack
+------------------------------------
+
+[First install and set up stack](http://docs.haskellstack.org/) for your
+(Linux) platform. After that you can build the software in the source
+directory with `stack build` and install it to stack binary installation
+directory with `stack install`.
 
 Technical information
 ---------------------
