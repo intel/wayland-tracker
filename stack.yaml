@@ -4,4 +4,4 @@ packages:
 extra-deps:
 - attoparsec-binary-0.2
 - binary-bits-0.5
-resolver: lts-3.15
+resolver: lts-6.14
