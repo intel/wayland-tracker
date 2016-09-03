@@ -144,6 +144,14 @@ command line:
 
     wayland-tracker binary -- weston-terminal --help
 
+Building wayland-tracker using stack
+------------------------------------
+
+[First install and set up stack](http://docs.haskellstack.org/) for your
+(Linux) platform. After that you can build the software in the source
+directory with `stack build` and install it to stack binary installation
+directory with `stack install`.
+
 Building wayland-tracker using cabal
 ------------------------------------
 
@@ -174,15 +182,6 @@ The binary will be created to `dist/build/wayland-tracker/wayland-tracker`. To
 install it in `$HOME/.cabal/bin/wayland-tracker`, use:
 
     cabal install
-
-
-Building wayland-tracker using stack
-------------------------------------
-
-[First install and set up stack](http://docs.haskellstack.org/) for your
-(Linux) platform. After that you can build the software in the source
-directory with `stack build` and install it to stack binary installation
-directory with `stack install`.
 
 Technical information
 ---------------------
