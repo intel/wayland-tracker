@@ -24,6 +24,6 @@ executable wayland-tracker
   build-depends:       base, mtl, stm, network, unix, bytestring, xml,
                        containers, binary-bits >= 0.3, cmdargs, utf8-string,
                        attoparsec, attoparsec-binary, time, aeson,
-                       base16-bytestring, cpu, binary, aeson-pretty <= 0.7.2
+                       base16-bytestring, cpu, binary, aeson-pretty >= 0.8.1
   hs-source-dirs:      ., cbits, src
   default-language:    Haskell2010
