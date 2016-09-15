@@ -163,5 +163,5 @@ writeLog (Logger lh lt) ts msg = do
             BS.hPut lh bNewLine
             IO.hFlush lh
     where
-        conf = AP.Config 4 ordering
+        conf = AP.Config (AP.Spaces 4) ordering AP.Generic
         ordering = AP.keyOrder ["type", "name", "object", "interface", "arguments", "value", "message", "timestamp"]
